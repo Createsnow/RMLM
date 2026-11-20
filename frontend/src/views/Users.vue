@@ -1,0 +1,88 @@
+<template>
+  <div>
+    <div class="page-head">
+      <h2>账号管理</h2><span class="sub">创建账号时勾选角色；"直属上级"由上下级关系自动得出，不是角色</span>
+      <span class="grow" />
+      <el-checkbox v-model="inactive" @change="load">含已停用</el-checkbox>
+      <el-input v-model="q" placeholder="姓名 / 账号" clearable style="width: 160px" @change="load" />
+      <el-upload :show-file-list="false" :http-request="doImport" accept=".xlsx"><el-button><el-icon><Upload /></el-icon>批量导入</el-button></el-upload>
+      <el-button type="primary" @click="openNew"><el-icon><Plus /></el-icon>新建账号</el-button>
+    </div>
+    <div class="card" style="padding: 0">
+      <el-table :data="rows" @row-click="edit">
+        <el-table-column prop="username" label="账号" width="120" />
+        <el-table-column prop="name" label="姓名" width="100" />
+        <el-table-column prop="title" label="岗位" />
+        <el-table-column prop="emp_no" label="工号" width="90" />
+        <el-table-column prop="manager_name" label="直属上级" width="100" />
+        <el-table-column label="角色"><template #default="{ row }">
+          <el-tag v-for="r in row.role_names" :key="r" size="small" class="flag">{{ r }}</el-tag>
+          <el-tag v-if="row.is_manager" size="small" type="success" class="flag">直属上级</el-tag>
+        </template></el-table-column>
+        <el-table-column label="状态" width="110"><template #default="{ row }">
+          <el-tag v-if="!row.active" type="info" size="small">停用</el-tag>
+          <el-tag v-if="row.frozen" type="danger" size="small">冻结</el-tag>
+        </template></el-table-column>
+      </el-table>
+    </div>
+    <div class="muted">批量导入列：序号 | 岗位 | 姓名 | 直属上级（姓名，顶层填 /）| 账号 | 角色（代码逗号分隔，可空）。初始密码 Rmlm@123456，首次登录强制修改。</div>
+    <el-dialog v-model="dlg" :title="f.id ? '编辑账号' : '新建账号'" width="520px">
+      <el-form label-width="90px">
+        <el-form-item label="账号" required><el-input v-model="f.username" :disabled="!!f.id" /></el-form-item>
+        <el-form-item label="姓名" required><el-input v-model="f.name" /></el-form-item>
+        <el-form-item label="岗位"><el-input v-model="f.title" /></el-form-item>
+        <el-form-item label="工号"><el-input v-model="f.emp_no" /></el-form-item>
+        <el-form-item label="直属上级">
+          <el-select v-model="f.manager_id" filterable clearable style="width: 100%">
+            <el-option v-for="u in all.filter(x => x.id !== f.id)" :key="u.id" :value="u.id" :label="`${u.name}（${u.username}）`" />
+          </el-select>
+          <div class="muted">审核人按"直属上级"确定；部门负责人的直属上级请设为研发副总。</div>
+        </el-form-item>
+        <el-form-item label="角色">
+          <el-checkbox-group v-model="f.roles">
+            <el-checkbox v-for="r in roles" :key="r.code" :value="r.code" :disabled="r.code === 'USER'">{{ r.name }}</el-checkbox>
+          </el-checkbox-group>
+        </el-form-item>
+        <el-form-item :label="f.id ? '重置密码' : '初始密码'"><el-input v-model="f.password" :placeholder="f.id ? '留空不改' : '留空则为 Rmlm@123456'" /></el-form-item>
+        <el-form-item v-if="f.id" label="启用"><el-switch v-model="f.active" />
+          <span class="muted" style="margin-left: 8px">停用前名下结存必须清零（离职 / 调岗卡点）</span></el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button v-if="f.id" @click="clearance">离职检查</el-button>
+        <el-button type="primary" @click="save">保存</el-button>
+      </template>
+    </el-dialog>
+  </div>
+</template>
+
+<script setup>
+import { onMounted, reactive, ref } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { api } from '../api'
+
+const rows = ref([])
+const all = ref([])
+const roles = ref([])
+const q = ref('')
+const inactive = ref(false)
+const dlg = ref(false)
+const f = reactive({})
+async function load() {
+  rows.value = await api.get(`/api/users?q=${encodeURIComponent(q.value)}&include_inactive=${inactive.value}`)
+  all.value = await api.get('/api/users')
+}
+function openNew() { Object.keys(f).forEach(k => delete f[k]); Object.assign(f, { username: '', name: '', roles: ['USER'], active: true, manager_id: null }); dlg.value = true }
+function edit(u) { Object.keys(f).forEach(k => delete f[k]); Object.assign(f, { ...u, roles: [...u.roles], password: '' }); dlg.value = true }
+async function save() {
+  const body = { username: f.username, name: f.name, title: f.title, emp_no: f.emp_no, manager_id: f.manager_id || null, roles: f.roles, password: f.password || null, active: f.active }
+  if (f.id) await api.put(`/api/users/${f.id}`, body)
+  else await api.post('/api/users', body)
+  ElMessage.success('已保存'); dlg.value = false; load()
+}
+async function clearance() {
+  const r = await api.get(`/api/users/${f.id}/clearance`)
+  ElMessageBox.alert(r.clear ? '名下无结存，可以办理离职 / 调岗。' : `名下还有 ${r.lines.length} 行未清零：${r.lines.map(l => l.code + '（' + l.balance + '）').join('、')}`, '离职检查')
+}
+async function doImport({ file }) { const r = await api.upload('/api/users/import', file); ElMessage.success(`新建 ${r.created} 个账号，初始密码 ${r.initial_password}`); load() }
+onMounted(async () => { roles.value = await api.get('/api/roles'); load() })
+</script>

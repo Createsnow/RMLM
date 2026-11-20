@@ -1,0 +1,40 @@
+# 研发物料管家：应用 + MySQL 8（不需要 Redis）
+services:
+  db:
+    image: mysql:8.0
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?请在 .env 中设置}
+      MYSQL_DATABASE: rmlm
+      MYSQL_USER: rmlm
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?请在 .env 中设置}
+      TZ: Asia/Shanghai
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_0900_ai_ci", "--default-time-zone=+08:00"]
+    volumes:
+      - mysql:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1"]
+      interval: 10s
+      retries: 10
+
+  app:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    restart: always
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      RMLM_DATABASE_URL: mysql+pymysql://rmlm:${MYSQL_PASSWORD}@db:3306/rmlm?charset=utf8mb4
+      RMLM_JWT_SECRET: ${RMLM_JWT_SECRET:?请在 .env 中设置}
+      RMLM_ADMIN_USER: ${RMLM_ADMIN_USER:-admin}
+      RMLM_ADMIN_PASSWORD: ${RMLM_ADMIN_PASSWORD:?请在 .env 中设置}
+    volumes:
+      - photos:/data/photos   # 照片永久保存，请纳入备份
+    ports:
+      - "8000:8000"
+
+volumes:
+  mysql:
+  photos:

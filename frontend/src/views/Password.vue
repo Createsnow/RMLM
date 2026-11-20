@@ -1,0 +1,30 @@
+<template>
+  <div class="card" style="max-width: 420px">
+    <h3>修改密码</h3>
+    <el-form label-position="top">
+      <el-form-item label="原密码"><el-input v-model="f.old" type="password" show-password /></el-form-item>
+      <el-form-item label="新密码（至少 8 位）"><el-input v-model="f.new" type="password" show-password /></el-form-item>
+      <el-form-item label="再输一次"><el-input v-model="again" type="password" show-password /></el-form-item>
+      <el-button type="primary" @click="save">保存</el-button>
+      <el-button v-if="$route.path.startsWith('/m')" @click="logout">退出登录</el-button>
+    </el-form>
+  </div>
+</template>
+
+<script setup>
+import { reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus'
+import { api } from '../api'
+import { logout } from '../store'
+
+const router = useRouter()
+const f = reactive({ old: '', new: '' })
+const again = ref('')
+async function save() {
+  if (f.new !== again.value) return ElMessage.error('两次输入不一致')
+  await api.post('/api/auth/password', f)
+  ElMessage.success('已修改')
+  router.back()
+}
+</script>
