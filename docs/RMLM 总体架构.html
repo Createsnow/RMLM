@@ -60,7 +60,7 @@ svg text{font-family:var(--f-body);fill:var(--fg)}
 <div class="wrap">
 <header>
   <h1>研发物料管家 RMLM 总体架构</h1>
-  <p class="lead">依据业务蓝图与系统方案 v1 绘制，已按新调整更新：确定使用企业微信（登录、工作台入口、通讯录、消息推送）；不对接仓储系统；金蝶物料改为 WebAPI 每日同步。</p>
+  <p class="lead">依据业务蓝图与系统方案 v1 绘制，已按新调整更新：确定使用企业微信（登录、工作台入口、通讯录、消息推送）；不对接仓储系统；金蝶单据由系统自动拉取，开单过账后使用人直接签收，不需要人工导入。</p>
 </header>
 
 <section>
@@ -98,7 +98,7 @@ svg text{font-family:var(--f-body);fill:var(--fg)}
     <rect x="370" y="284" width="143" height="96" rx="7" class="mod"/><text x="441.5" y="308" text-anchor="middle" class="t">报表看板</text>
       <text x="441.5" y="330" text-anchor="middle" class="s">验收三项门槛</text><text x="441.5" y="348" text-anchor="middle" class="s">超期·代登·损耗</text><text x="441.5" y="366" text-anchor="middle" class="s">项目用量与金额</text>
     <rect x="525" y="284" width="143" height="96" rx="7" class="mod"/><text x="596.5" y="304" text-anchor="middle" class="t">定时任务</text>
-      <text x="596.5" y="324" text-anchor="middle" class="s">每 15 分钟：升级·推送补发</text><text x="596.5" y="340" text-anchor="middle" class="s">每日：对账·超期·同步</text><text x="596.5" y="356" text-anchor="middle" class="s">每周：报废批次</text><text x="596.5" y="372" text-anchor="middle" class="s">季度确认·月初关账提醒</text>
+      <text x="596.5" y="324" text-anchor="middle" class="s">每 15 分钟：拉单·升级·补发</text><text x="596.5" y="340" text-anchor="middle" class="s">每日：对账·超期·同步</text><text x="596.5" y="356" text-anchor="middle" class="s">每周：报废批次</text><text x="596.5" y="372" text-anchor="middle" class="s">季度确认·月初关账提醒</text>
 
     <text x="60" y="410" class="s">原则：事件只增不改 · 结存由事件推算 · 改错用冲销 · 金蝶只读 · 密钥只放 .env</text>
 
@@ -109,10 +109,10 @@ svg text{font-family:var(--f-body);fill:var(--fg)}
     <text x="760" y="122" class="c">外部系统</text>
     <rect x="760" y="130" width="200" height="118" rx="8" class="erpb"/>
       <text x="776" y="154" class="t">金蝶云星空</text><rect x="904" y="141" width="44" height="18" rx="9" class="tag-e"/><text x="926" y="154" text-anchor="middle" class="tagt">只读</text>
-      <text x="776" y="178" class="s">物料：WebAPI 每日增量</text><text x="776" y="196" class="s">BD_MATERIAL · 组织 100</text>
-      <text x="776" y="218" class="s">项目、单据：Excel 导入</text><text x="776" y="236" class="s">表单待确认后接口化</text>
+      <text x="776" y="178" class="s">物料：WebAPI 每日增量</text><text x="776" y="196" class="s">单据：WebAPI 每 15 分钟拉取</text>
+      <text x="776" y="218" class="s">项目档案：WebAPI 每日同步</text><text x="776" y="236" class="s">单据、项目表单待确认</text>
     <path d="M758,184 H693" class="ln" marker-end="url(#ah)"/><text x="725" y="177" text-anchor="middle" class="c">物料</text>
-    <path d="M758,226 H693" class="ln dash" marker-end="url(#ah)"/><text x="725" y="219" text-anchor="middle" class="c">项目·单据</text>
+    <path d="M758,226 H693" class="ln dash" marker-end="url(#ah)"/><text x="725" y="219" text-anchor="middle" class="c">单据·项目</text>
 
     <rect x="760" y="266" width="200" height="178" rx="8" class="wxb"/>
       <text x="776" y="290" class="t">企业微信</text><rect x="878" y="277" width="70" height="18" rx="9" class="tag-a"/><text x="913" y="290" text-anchor="middle" class="tagt">确定使用</text>
@@ -128,24 +128,24 @@ svg text{font-family:var(--f-body);fill:var(--fg)}
       <text x="776" y="509" class="s">仓储系统：本系统发 RM 码</text><text x="776" y="526" class="s">OA：审核在本系统内完成</text>
 
     <path d="M40,574 H80" class="ln" marker-end="url(#ah)"/><text x="88" y="578" class="s">已接入（代码完成，上线前联调）</text>
-    <path d="M280,574 H320" class="ln dash" marker-end="url(#ah)"/><text x="328" y="578" class="s">暂用 Excel 导入，待接口化</text>
+    <path d="M280,574 H320" class="ln dash" marker-end="url(#ah)"/><text x="328" y="578" class="s">金蝶表单待确认，待接口化</text>
     <rect x="500" y="566" width="16" height="16" rx="3" class="erpb"/><text x="522" y="578" class="s">金蝶记结果</text>
     <rect x="610" y="566" width="16" height="16" rx="3" class="app"/><text x="632" y="578" class="s">中台记过程</text>
   </svg>
   </div>
-  <p class="cap">外部系统有两个：金蝶（只读。物料已接 WebAPI，项目和单据暂用 Excel 导入）和企业微信（确定使用：登录、工作台入口、通讯录、消息推送）。两边代码都已完成，上线前分别联调；接口没配置时，系统自动退回 Excel 导入和账号密码登录。</p>
+  <p class="cap">外部系统有两个：金蝶（只读。物料已接 WebAPI；领料、退料、报废单和项目档案也由系统通过 WebAPI 自动拉取，金蝶表单确认后接入）和企业微信（确定使用：登录、工作台入口、通讯录、消息推送）。上线前两边分别联调；企微没配置时，系统自动退回账号密码登录。</p>
 </section>
 
 <section>
   <h2>二、业务主流程</h2>
   <div class="scroll"><svg id="flow" role="img" aria-label="业务主流程泳道图：从提需求到月度关账"></svg></div>
-  <p class="cap">图中只画主路径。并行运行的还有：定时任务每 15 分钟和每天巡检一次，把审核超时、超期（S5）、连续两周无动作冻结、差异超 48 小时等情况派成待办，按三级升级（本人 → 直属上级 → 月度经营会），同时推送企微应用消息（失败每 15 分钟补发，以站内待办为准）。紧急领用可以先签收、24 小时内补审核和 ERP 单；审核被驳回时退回申请人。</p>
+  <p class="cap">图中只画主路径。领料专员在金蝶开单过账后，系统每 15 分钟拉取单据，按备注里的申请号匹配申请、自动生成领用行，使用人直接签收，不需要人工导入；匹配不上的由领料专员手工绑定。虚线表示自动拉取金蝶单据，金蝶表单确认后接入。并行运行的还有：定时任务每 15 分钟和每天巡检一次，把审核超时、超期（S5）、连续两周无动作冻结、差异超 48 小时等情况派成待办，按三级升级（本人 → 直属上级 → 月度经营会），同时推送企微应用消息（失败每 15 分钟补发，以站内待办为准）。紧急领用可以先签收、24 小时内补审核和 ERP 单；审核被驳回时退回申请人。</p>
 </section>
 
 <section>
   <h2>三、对外边界</h2>
   <ul class="bounds">
-    <li><b>金蝶只读。</b>中台不写金蝶，两边只用“单据号 + 行号 + 数量”对账。物料档案通过 WebAPI 每天增量同步（金蝶禁用的物料在中台停用、不删除）；项目档案和领料 / 退料 / 报废单暂用 Excel 导入，确认表单后改为接口。</li>
+    <li><b>金蝶只读。</b>中台不写金蝶，两边只用“单据号 + 行号 + 数量”对账。物料档案通过 WebAPI 每天增量同步（金蝶禁用的物料在中台停用、不删除）。领料 / 退料 / 报废单由系统每 15 分钟从金蝶拉取：领料单过账后，系统按备注里的申请号自动生成领用行，使用人直接签收，不需要人工导入；匹配不上的才由领料专员手工绑定。单据和项目档案的金蝶表单待确认后接入。</li>
     <li><b>不对接仓储。</b>物料码由本系统发放（RM 开头），在电脑端用浏览器打印到标签打印机。待定：签收时就给每件打码，还是只给拆分出来的件打码。</li>
     <li><b>确定使用企业微信。</b>手机端在企微工作台打开 H5，用网页授权免密登录；人员、职务和直属上级每天从企微通讯录同步；待办、升级和关账提醒推送企微应用消息，失败每 15 分钟补发、最多 3 次，以站内待办为准。差异认领、关账等操作在电脑端完成。OA 不接。</li>
     <li><b>部署。</b>应用放内网（要访问金蝶内网地址），由 DMZ 的 HTTPS 反向代理以企业已备案域名对外，这个域名要在企微后台设为可信域名（即 RMLM_PUBLIC_URL）。服务器还要能出站访问企微接口 qyapi.weixin.qq.com，出口 IP 填进企微后台的企业可信 IP。金蝶、企微的密钥只写在服务器 .env 里。</li>
@@ -163,20 +163,20 @@ svg text{font-family:var(--f-body);fill:var(--fg)}
     n2:[1,0,"审核",["同意或驳回","4h 提醒·24h 升级"]],
     n3:[2,1,"开领料单",["在金蝶开单","备注写申请号"]],
     n4:[4,1,"领料出库",["QTCK 过账"]],
-    n5:[2,2,"导入单据",["Excel 导入","绑定到申请"]],
-    n6:[3,2,"生成领用行",["发 RM 码","S0 待签收"]],
-    n7:[0,3,"本人签收",["不许代签","S1 在制未使用"]],
-    n8:[0,4,"使用与流转",["耗用·损耗·拆分","暂存·转交需确认"]],
-    n9:[0,5,"退库/报废登记",["登记即扣结存","S6 待开单"]],
-    n10:[2,5,"开退料/报废单",["报废每周按箱","批次开单"]],
-    n11:[4,5,"退料·报废出库",["QTRK·报废单"]],
-    n12:[3,6,"分摊到行",["先进先出","S7 已结案"]],
-    n13:[3,7,"每日对账",["单号+行号+数量","差额进差异池"]],
-    n14:[2,7,"认领差异",["48h 内处理","超时升级"]],
-    n15:[5,8,"关闭与关账",["选原因码","每月 3 日前"]]
+    n5:[3,2,"自动生成领用行",["按申请号匹配","发 RM 码 · S0"]],
+    n6:[0,3,"本人签收",["不许代签","S1 在制未使用"]],
+    n7:[0,4,"使用与流转",["耗用·损耗·拆分","暂存·转交需确认"]],
+    n8:[0,5,"退库/报废登记",["登记即扣结存","S6 待开单"]],
+    n9:[2,5,"开退料/报废单",["报废每周按箱","批次开单"]],
+    n10:[4,5,"退料·报废出库",["QTRK·报废单"]],
+    n11:[3,6,"分摊到行",["先进先出","S7 已结案"]],
+    n12:[3,7,"每日对账",["单号+行号+数量","差额进差异池"]],
+    n13:[2,7,"认领差异",["48h 内处理","超时升级"]],
+    n14:[5,8,"关闭与关账",["选原因码","每月 3 日前"]]
   };
-  var E=[["n1","n2"],["n2","n3"],["n3","n4","过账"],["n4","n5"],["n5","n6"],["n6","n7"],["n7","n8"],
-         ["n8","n9"],["n9","n10"],["n10","n11"],["n11","n12"],["n12","n13"],["n13","n14"],["n14","n15"]];
+  // 第四项为 1：金蝶单据自动拉取（虚线，表单确认后接入）
+  var E=[["n1","n2"],["n2","n3"],["n3","n4","过账"],["n4","n5","",1],["n5","n6"],["n6","n7"],["n7","n8"],
+         ["n8","n9"],["n9","n10"],["n10","n11","",1],["n11","n12"],["n12","n13"],["n13","n14"]];
   function bx(id){var n=N[id];return {x:LW+n[1]*CW+7,y:n[0]*LH+13,l:n[0],c:n[1]}}
   var s='<defs><marker id="ah2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="ah"/></marker></defs>';
   LANES.forEach(function(name,i){
@@ -195,7 +195,7 @@ svg text{font-family:var(--f-body);fill:var(--fg)}
       var sx=a.x+BW, sy=a.y+BH/2, ty=b.y+BH/2, mx=sx+(CW-BW)/2;
       d=sy===ty ? 'M'+sx+','+sy+' H'+(b.x-2) : 'M'+sx+','+sy+' H'+mx+' V'+ty+' H'+(b.x-2);
     }
-    s+='<path d="'+d+'" class="ln" marker-end="url(#ah2)"/>';
+    s+='<path d="'+d+'" class="ln'+(e[3]?' dash':'')+'" marker-end="url(#ah2)"/>';
   });
   Object.keys(N).forEach(function(id){
     var n=N[id], p=bx(id), cls=n[0]===3?'n-sys':n[0]===4?'n-erp':'n-act', cx=p.x+BW/2;
