@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from .. import clock
 from ..models import ErpDoc, ErpLine, Freeze, JobRun, LedgerLine, Project, Requisition, Todo, User
 from ..perms import active_delegates, default_approver
-from . import disposal, ledger, master_sync, recon, wecom
+from . import disposal, doc_sync, erp, ledger, master_sync, recon, wecom
 from .common import add_todo, notify, period_of, quarter_of, users_with_role
 
 
@@ -26,7 +26,9 @@ def _manager_or_head(db: Session, user_id: int) -> int | None:
 def quarter_hour(db: Session) -> dict:
     now = clock.now()
     stats = {"remind": 0, "escalate": 0, "urgent": 0, "unbound": 0, "todo_l2": 0, "todo_l3": 0, "locked": 0,
-             "push": wecom.retry_pending(db)}
+             "push": wecom.retry_pending(db),
+             # 0. 拉金蝶单据；按申请号自动生成领用行（含申请晚于单据审核通过的情况）
+             "doc_sync": doc_sync.quarter_sync(db), "auto_bound": erp.auto_bind(db)}
     # 1. 审核：4 小时提醒，24 小时升级上一级
     for req in db.scalars(select(Requisition).where(Requisition.status == "PENDING")):
         age = now - req.created_at
@@ -66,7 +68,7 @@ def quarter_hour(db: Session) -> dict:
             stats["urgent"] += 1
     # 3. ERP 有单无明细：24 小时内补登
     for ln, doc in db.execute(select(ErpLine, ErpDoc).join(ErpDoc).where(ErpDoc.doc_type.in_(("LL", "AB")),
-                                                                          ErpDoc.posted.is_(True))):
+                                                                          ErpDoc.posted.is_(True), ErpLine.qty > 0)):
         if doc.created_at < now - timedelta(hours=24) and not db.scalar(
             select(LedgerLine.id).where(LedgerLine.erp_line_id == ln.id)
         ):

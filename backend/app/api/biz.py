@@ -12,8 +12,9 @@ from ..errors import BizError, forbid
 from ..models import ErpDoc, ErpLine, Event, LedgerLine, Material, PeriodClose, ReconDiff, Requisition, ScrapBatch, User
 from ..perms import active_delegates, can_view_line, has_role, require_role, visible_user_ids
 from ..security import current_user
-from ..services import disposal, erp as erpsvc, ledger, lineops, recon, reports
+from ..services import disposal, doc_sync, erp as erpsvc, ledger, lineops, recon, reports
 from ..services import requisition as reqsvc
+from ..services.k3cloud import K3Error
 from ..services.recon import KIND_NAMES
 from .serial import check_photos, erp_doc_out, get_or_404, line_out, req_out, s
 
@@ -176,6 +177,26 @@ def finance_approve(did: int, user: User = Depends(current_user), db: Session = 
 @router.post("/erp/docs/{did}/receive")
 def receive(did: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
     return erp_doc_out(db, erpsvc.warehouse_receive(db, user, get_or_404(db, ErpDoc, did, "单据")))
+
+
+@router.get("/erp/docs/sync/status")
+def erp_doc_sync_status(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """金蝶单据同步状态：是否已配置接口、最近同步时间与结果。"""
+    return doc_sync.status(db)
+
+
+@router.post("/erp/docs/sync")
+def erp_doc_sync(full: bool = False, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """立即从金蝶拉取单据并自动生成领用行（定时任务每 15 分钟也会做）。默认增量，full=true 全量。"""
+    require_role(user, "KEEPER", "ADMIN")
+    try:
+        out = doc_sync.sync_docs(db, full=full)
+    except NotImplementedError as e:
+        raise BizError(str(e))
+    except K3Error as e:
+        raise BizError(str(e), 502)
+    recon.run(db)
+    return out
 
 
 @router.get("/erp/suggestions")

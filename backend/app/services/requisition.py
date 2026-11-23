@@ -148,7 +148,8 @@ def urgent_handover(db: Session, op: User, req: Requisition, item_id: int) -> Le
     return line
 
 
-def _new_line(db: Session, op: User, req: Requisition, item: ReqItem, qty, erp_line) -> LedgerLine:
+def _new_line(db: Session, op: User | None, req: Requisition, item: ReqItem, qty, erp_line) -> LedgerLine:
+    """生成领用行。op 为空表示系统按金蝶单据自动生成（没有经手的领料专员）。"""
     m = db.get(Material, item.material_id)
     price = (erp_line.unit_price if erp_line is not None and erp_line.unit_price is not None else m.unit_price)
     line = LedgerLine(
@@ -157,7 +158,7 @@ def _new_line(db: Session, op: User, req: Requisition, item: ReqItem, qty, erp_l
         material_id=item.material_id, qty=D(qty), unit_price=price, user_id=req.user_id, holder_id=req.user_id,
         due_date=req.expected_return, long_cycle=req.long_cycle,
         long_cycle_max=req.expected_return if req.long_cycle else None,
-        issued_by=op.id, self_issue=(op.id == req.user_id),
+        issued_by=op.id if op else None, self_issue=(op is not None and op.id == req.user_id),
     )
     db.add(line)
     db.flush()

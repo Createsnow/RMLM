@@ -228,5 +228,7 @@ class K3CloudReader:
     def fetch_projects(self) -> list[dict]:
         raise NotImplementedError("项目档案在金蝶中的表单尚未确认，暂用 Excel 导入")
 
-    def fetch_docs(self, since) -> list[dict]:
-        raise NotImplementedError("领料 / 退料 / 报废单的表单尚未确认，暂用 Excel 导入")
+    def fetch_docs(self, since: datetime | None = None) -> list[dict]:
+        # 待金蝶管理员确认：研发领料 / 退料 / 报废 / A 转 B / 调整单各用哪个表单，以及单号、行号、物料编码、
+        # 数量、单价、项目、备注（申请号）、审核状态、修改日期的字段。确认后在这里按 ErpReader 的格式返回。
+        raise NotImplementedError("金蝶单据表单尚未确认，暂不能自动拉取单据")

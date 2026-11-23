@@ -1,7 +1,8 @@
 """金蝶单据镜像（只读，不回写金蝶）。
 
-单据来源：手工录入 / Excel 导入（金蝶导出）/ 金蝶只读接口（ErpReader，金蝶实现见 k3cloud.py）。
-主数据：物料已接金蝶 WebAPI（master_sync.py）；项目档案仍用 Excel 导入。
+主路径：系统定时从金蝶拉取单据（doc_sync.py），领料单过账后按备注里的申请号自动生成领用行，
+使用人直接签收，不需要人工导入。手工录入 / Excel 导入只作应急兜底（接口未通或故障时）。
+主数据：物料已接金蝶 WebAPI（master_sync.py）；项目档案的表单待确认。
 """
 import re
 from datetime import date, datetime
@@ -22,12 +23,15 @@ DOC_TYPES = {"LL", "AB", "TL", "BF", "TZ"}
 
 
 class ErpReader(Protocol):
-    """金蝶只读接口约定：由定时任务按天增量拉取。
+    """金蝶只读接口约定。
 
     fetch_materials 每行：code, name, spec, unit, category, erp_id, forbidden(bool), modified_at(datetime|None)。
+    fetch_docs 每张单据：no, doc_type(LL/AB/TL/BF/TZ), doc_date, posted(bool), remark, ref_doc_no,
+        modified_at(datetime|None), lines=[{line_no, material_code, qty, unit_price, project_code, ref_line_no}]。
+        since 为空表示全量；否则只要修改时间 >= since 的单据。
     """
 
-    def fetch_docs(self, since: date) -> list[dict]: ...
+    def fetch_docs(self, since: datetime | None = None) -> list[dict]: ...
     def fetch_projects(self) -> list[dict]: ...
     def fetch_materials(self, since: datetime | None = None) -> list[dict]: ...
 
@@ -143,13 +147,62 @@ def suggestions(db: Session) -> list[dict]:
     return out
 
 
+AUTO_SOURCES = ("API", "IMPORT")
+
+
+def line_bound(db: Session, erp_line_id: int) -> bool:
+    return db.scalar(select(LedgerLine.id).where(LedgerLine.erp_line_id == erp_line_id).limit(1)) is not None
+
+
+def auto_bind(db: Session) -> int:
+    """自动生成领用行：金蝶拉来的（或导入的）已过账领料单，备注里写了申请号，
+    且该单据行在这些申请里恰好对上一条同物料、审核通过、还没开单的明细，就直接绑定。
+    对不上（没写申请号、申请未审核、同物料多条候选）的留给领料专员手工绑定，
+    超过 24 小时由每 15 分钟的巡检派"ERP 有单无明细"待办。返回本次绑定的行数。"""
+    bound_erp = select(LedgerLine.erp_line_id).where(LedgerLine.erp_line_id.is_not(None))
+    rows = db.execute(
+        select(ErpLine, ErpDoc).join(ErpDoc)
+        .where(ErpDoc.doc_type.in_(("LL", "AB")), ErpDoc.posted.is_(True), ErpDoc.source.in_(AUTO_SOURCES),
+               ErpLine.qty > 0, ErpLine.id.not_in(bound_erp))
+        .order_by(ErpDoc.id, ErpLine.line_no)
+    ).all()
+    n = 0
+    for ln, doc in rows:
+        nos = REQ_NO.findall(doc.remark or "")
+        if not nos:
+            continue
+        cands = []
+        for r in db.scalars(select(Requisition).where(Requisition.no.in_(nos))):
+            for it in r.items:
+                if it.material_id != ln.material_id:
+                    continue
+                lines = list(db.scalars(select(LedgerLine).where(LedgerLine.req_item_id == it.id,
+                                                                 LedgerLine.level == 1)))
+                if any(x.erp_line_id is not None for x in lines):
+                    continue  # 已开单
+                urgent = next((x for x in lines if x.urgent and x.erp_line_id is None), None)
+                if r.status == "APPROVED" or urgent is not None:
+                    cands.append(it)
+        if len(cands) == 1:
+            _bind(db, None, cands[0], ln)
+            n += 1
+    db.flush()
+    return n
+
+
 def bind(db: Session, op: User, req_item_id: int, erp_line_id: int) -> LedgerLine:
-    """把审核通过的申请明细绑定到金蝶领料单行（一物一行），生成领用行；紧急行则补挂单据。"""
+    """领料专员手工绑定：自动匹配不上（备注没写申请号、同一物料有多条候选）时用。"""
     require_role(op, "KEEPER")
     item = db.get(ReqItem, req_item_id)
     erp = db.get(ErpLine, erp_line_id)
     if not item or not erp:
         raise BizError("申请明细或 ERP 单据行不存在")
+    return _bind(db, op, item, erp)
+
+
+def _bind(db: Session, op: User | None, item: ReqItem, erp: ErpLine) -> LedgerLine:
+    """把审核通过的申请明细绑定到金蝶领料单行（一物一行），生成领用行；紧急行则补挂单据。
+    op 为空表示系统自动绑定。"""
     req = item.req
     if erp.doc.doc_type not in ("LL", "AB"):
         raise BizError("只能绑定领料出库单 / A 转 B 单")
@@ -178,7 +231,7 @@ def bind(db: Session, op: User, req_item_id: int, erp_line_id: int) -> LedgerLin
 
 # ------------------------------------------------------------------ Excel 导入
 def import_docs_xlsx(db: Session, op: User, fileobj) -> int:
-    """列：单据号 | 类型(LL/AB/TL/BF/TZ) | 日期 | 已过账(是/否) | 备注 | 原单号 | 行号 | 物料编码 | 数量 | 单价 | 项目号 | 原单行号"""
+    """应急兜底（金蝶接口未通或故障时）。列：单据号 | 类型(LL/AB/TL/BF/TZ) | 日期 | 已过账(是/否) | 备注 | 原单号 | 行号 | 物料编码 | 数量 | 单价 | 项目号 | 原单行号"""
     require_role(op, "KEEPER", "ADMIN")
     ws = load_workbook(fileobj, read_only=True, data_only=True).active
     docs: dict[str, dict] = {}
@@ -196,6 +249,7 @@ def import_docs_xlsx(db: Session, op: User, fileobj) -> int:
                            "project_code": row[10], "ref_line_no": row[11] if len(row) > 11 else None})
     for d in docs.values():
         save_doc(db, op, d, source="IMPORT")
+    auto_bind(db)
     return len(docs)
 
 
