@@ -31,7 +31,8 @@ def say(msg: str) -> None:
 
 def fail(msg: str) -> None:
     print(f"\n错误：{msg}", file=sys.stderr, flush=True)
-    if WINDOWS and not sys.stdin.isatty():  # 双击运行时窗口不要一闪而过
+    # Windows 资源管理器里双击运行时（没有经过 cmd，环境变量里没有 PROMPT），出错后停住，窗口不要一闪而过
+    if WINDOWS and "PROMPT" not in os.environ:
         input("按回车键退出…")
     sys.exit(1)
 
