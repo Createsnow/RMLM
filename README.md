@@ -36,16 +36,20 @@ docker compose up -d --build
 
 前提：已安装 Python 3.11+、Node.js 18+，本机有 MySQL 8，并已建好库（默认库名 `rmlm`、账号 `rmlm`，可在 `.env` 里改）。
 
-| 系统 | 一键启动 | 改了前端代码后：重建前端再启动 |
-|---|---|---|
-| Windows | 双击 `start.bat` | 命令行运行 `start.bat rebuild` |
-| macOS / Linux | `./start.sh` | `./start.sh rebuild` |
+在仓库根目录运行（Windows、macOS、Linux 命令相同；Mac/Linux 上 `python` 可能叫 `python3`）：
 
-脚本会自动完成：
+```bash
+python start.py            # 一键启动
+```
+```bash
+python start.py rebuild    # 改了前端代码后：重建前端再启动
+```
+
+`start.py` 只用 Python 标准库，会自动完成：
 - 首次运行时从 `.env.example` 生成 `.env`；
 - 创建 Python 虚拟环境 `backend/.venv`，按需安装后端依赖（`requirements.txt` 变了才重装）；
 - 前端还没构建、或指定了 `rebuild` 时，安装前端依赖并构建（`package-lock.json` 变了才重装）；
-- 检查数据库能否连上，连不上会给出提示；
+- 检查数据库能否连上、端口是否被占用，有问题给出中文提示；
 - 启动服务。启动后访问 `http://localhost:8000`，手机在同一局域网内用 `http://电脑IP:8000` 访问。
 
 数据库地址、端口、管理员账号等都在 `.env` 里改。
