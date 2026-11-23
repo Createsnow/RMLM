@@ -32,28 +32,45 @@ docker compose up -d --build
 
 **备份**：`deploy/backup.sh` 每日备份数据库和照片。照片永久保存，务必纳入备份。
 
-## 本地开发
+## 本地一键启动
+
+前提：已安装 Python 3.11+、Node.js 18+，本机有 MySQL 8，并已建好库（默认库名 `rmlm`、账号 `rmlm`，可在 `.env` 里改）。
+
+| 系统 | 一键启动 | 改了前端代码后：重建前端再启动 |
+|---|---|---|
+| Windows | 双击 `start.bat` | 命令行运行 `start.bat rebuild` |
+| macOS / Linux | `./start.sh` | `./start.sh rebuild` |
+
+脚本会自动完成：
+- 首次运行时从 `.env.example` 生成 `.env`；
+- 创建 Python 虚拟环境 `backend/.venv`，按需安装后端依赖（`requirements.txt` 变了才重装）；
+- 前端还没构建、或指定了 `rebuild` 时，安装前端依赖并构建（`package-lock.json` 变了才重装）；
+- 检查数据库能否连上，连不上会给出提示；
+- 启动服务。启动后访问 `http://localhost:8000`，手机在同一局域网内用 `http://电脑IP:8000` 访问。
+
+数据库地址、端口、管理员账号等都在 `.env` 里改。
+
+可选：写入演示数据（虚构人员，密码 `Demo@1234`）：
 
 ```bash
-# 后端（需要本机 MySQL，库名 rmlm）
-cd backend
-pip install -r requirements-dev.txt
-export RMLM_DATABASE_URL="mysql+pymysql://rmlm:密码@127.0.0.1:3306/rmlm?charset=utf8mb4"
-python -m scripts.demo_seed          # 可选：写入演示数据（虚构人员，密码 Demo@1234）
-uvicorn app.main:app --reload --port 8000
+cd backend && .venv/bin/python -m scripts.demo_seed        # Windows：.venv\Scripts\python -m scripts.demo_seed
+```
 
-# 前端
-cd frontend
-npm install
-npm run dev                          # http://localhost:5173，/api 代理到 8000
+### 前端热更新开发（可选）
+
+需要边改边看效果时，先用上面的脚本启动后端，再另开一个终端：
+
+```bash
+cd frontend && npm run dev            # http://localhost:5173，/api 自动代理到 8000
 ```
 
 ## 测试
 
 ```bash
 cd backend
+.venv/bin/pip install -r requirements-dev.txt
 # 使用独立测试库 rmlm_test（会清空）
-RMLM_DATABASE_URL="mysql+pymysql://rmlm:密码@127.0.0.1:3306/rmlm_test?charset=utf8mb4" python -m pytest -q
+RMLM_DATABASE_URL="mysql+pymysql://rmlm:密码@127.0.0.1:3306/rmlm_test?charset=utf8mb4" .venv/bin/python -m pytest -q
 ```
 
 ## 环境变量
