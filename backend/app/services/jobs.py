@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from .. import clock
 from ..models import ErpDoc, ErpLine, Freeze, JobRun, LedgerLine, Project, Requisition, Todo, User
 from ..perms import active_delegates, default_approver
-from . import disposal, ledger, recon
+from . import disposal, ledger, master_sync, recon, wecom
 from .common import add_todo, notify, period_of, quarter_of, users_with_role
 
 
@@ -25,7 +25,8 @@ def _manager_or_head(db: Session, user_id: int) -> int | None:
 # ------------------------------------------------------------------ 每 15 分钟
 def quarter_hour(db: Session) -> dict:
     now = clock.now()
-    stats = {"remind": 0, "escalate": 0, "urgent": 0, "unbound": 0, "todo_l2": 0, "todo_l3": 0, "locked": 0}
+    stats = {"remind": 0, "escalate": 0, "urgent": 0, "unbound": 0, "todo_l2": 0, "todo_l3": 0, "locked": 0,
+             "push": wecom.retry_pending(db)}
     # 1. 审核：4 小时提醒，24 小时升级上一级
     for req in db.scalars(select(Requisition).where(Requisition.status == "PENDING")):
         age = now - req.created_at
@@ -106,7 +107,8 @@ def quarter_hour(db: Session) -> dict:
 # ------------------------------------------------------------------ 每天
 def daily(db: Session) -> dict:
     now, today = clock.now(), clock.today()
-    stats = {"recon": recon.run(db), "overdue": 0, "frozen": 0, "renew": 0, "lapsed": 0, "project": 0}
+    stats = {"recon": recon.run(db), "overdue": 0, "frozen": 0, "renew": 0, "lapsed": 0, "project": 0,
+             "material_sync": master_sync.daily_sync(db), "contact_sync": wecom.daily_sync(db)}
     lines = list(db.scalars(select(LedgerLine).where(LedgerLine.signed.is_(True), LedgerLine.voided.is_(False))))
     calcs = ledger.load(db, lines)
     for line in lines:

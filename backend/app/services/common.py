@@ -89,6 +89,9 @@ def add_todo(
     )
     db.add(t)
     db.flush()
+    from .wecom import mark_pending  # 延迟导入，避免循环引用
+
+    mark_pending(db, t)
     return t
 
 

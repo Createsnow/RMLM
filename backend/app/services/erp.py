@@ -1,9 +1,10 @@
 """金蝶单据镜像（只读，不回写金蝶）。
 
-单据来源：手工录入 / Excel 导入（金蝶导出）/ 将来的金蝶只读接口（实现 ErpReader 即可接入）。
+单据来源：手工录入 / Excel 导入（金蝶导出）/ 金蝶只读接口（ErpReader，金蝶实现见 k3cloud.py）。
+主数据：物料已接金蝶 WebAPI（master_sync.py）；项目档案仍用 Excel 导入。
 """
 import re
-from datetime import date
+from datetime import date, datetime
 from typing import Protocol
 
 from openpyxl import load_workbook
@@ -21,11 +22,14 @@ DOC_TYPES = {"LL", "AB", "TL", "BF", "TZ"}
 
 
 class ErpReader(Protocol):
-    """金蝶只读接口约定：实现后由定时任务按天增量拉取。"""
+    """金蝶只读接口约定：由定时任务按天增量拉取。
+
+    fetch_materials 每行：code, name, spec, unit, category, erp_id, forbidden(bool), modified_at(datetime|None)。
+    """
 
     def fetch_docs(self, since: date) -> list[dict]: ...
     def fetch_projects(self) -> list[dict]: ...
-    def fetch_materials(self) -> list[dict]: ...
+    def fetch_materials(self, since: datetime | None = None) -> list[dict]: ...
 
 
 def save_doc(db: Session, op: User | None, data: dict, source: str = "MANUAL") -> ErpDoc:

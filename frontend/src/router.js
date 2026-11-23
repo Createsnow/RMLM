@@ -59,7 +59,7 @@ const routes = [
 const router = createRouter({ history: createWebHistory(), routes })
 
 router.beforeEach(to => {
-  if (!to.meta.public && !store.token) return '/login'
+  if (!to.meta.public && !store.token) return { path: '/login', query: to.fullPath === '/' ? {} : { next: to.fullPath } }
   if (to.path === '/' && isMobile() && !sessionStorage.getItem('rmlm_pc')) return '/m'
   document.title = `${to.meta.title ? to.meta.title + ' · ' : ''}研发物料管家`
 })

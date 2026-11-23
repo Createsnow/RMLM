@@ -6,7 +6,8 @@ import jwt
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import select
+from sqlalchemy import inspect, select, text
+from sqlalchemy.schema import CreateColumn
 
 from . import db as dbmod
 from .api import biz, core
@@ -18,8 +19,30 @@ from .security import hash_password
 log = logging.getLogger("rmlm")
 
 
+def upgrade_schema() -> None:
+    """轻量升级：给已有表补上新增的列和索引（只增不删、不改类型）。"""
+    insp = inspect(dbmod.engine)
+    existing = set(insp.get_table_names())
+    with dbmod.engine.begin() as conn:
+        for table in dbmod.Base.metadata.sorted_tables:
+            if table.name not in existing:
+                continue
+            have = {c["name"] for c in insp.get_columns(table.name)}
+            for col in table.columns:
+                if col.name not in have:
+                    ddl = CreateColumn(col).compile(dialect=dbmod.engine.dialect)
+                    conn.execute(text(f"ALTER TABLE `{table.name}` ADD COLUMN {ddl}"))
+                    log.info("schema: %s.%s added", table.name, col.name)
+            have_idx = {i["name"] for i in insp.get_indexes(table.name)}
+            for idx in table.indexes:
+                if idx.name not in have_idx:
+                    idx.create(conn)
+                    log.info("schema: index %s added", idx.name)
+
+
 def init_db() -> None:
     dbmod.Base.metadata.create_all(dbmod.engine)
+    upgrade_schema()
     with dbmod.SessionLocal() as db:
         for dtype, items in SEED.items():
             have = set(db.scalars(select(DictItem.code).where(DictItem.dict_type == dtype)))
@@ -35,6 +58,10 @@ def init_db() -> None:
 @asynccontextmanager
 async def lifespan(_app):
     init_db()
+    if settings.wecom_enabled:
+        from .services.wecom import install_push_hook
+
+        install_push_hook()
     if settings.enable_scheduler:
         from .scheduler import start
 
@@ -46,7 +73,7 @@ app = FastAPI(title="研发物料管家 RMLM", version="1.0.0", lifespan=lifespa
 app.include_router(core.router)
 app.include_router(biz.router)
 
-SENSITIVE = {"password", "old", "new"}
+SENSITIVE = {"password", "old", "new", "code"}
 
 
 @app.middleware("http")

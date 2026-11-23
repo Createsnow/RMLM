@@ -60,6 +60,8 @@ def create(db: Session, op: User, data: dict) -> Requisition:
         m = db.get(Material, int(it.get("material_id") or 0))
         if not m:
             raise BizError("物料只能扫码或从主数据选择")
+        if not m.active:
+            raise BizError(f"物料 {m.code} 已在金蝶禁用，不能再申请")
         q = D(it.get("qty"))
         if q <= 0:
             raise BizError("数量必须大于 0")
