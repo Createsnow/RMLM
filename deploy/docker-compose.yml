@@ -26,10 +26,26 @@ services:
       db:
         condition: service_healthy
     environment:
-      RMLM_DATABASE_URL: mysql+pymysql://rmlm:${MYSQL_PASSWORD}@db:3306/rmlm?charset=utf8mb4
+      DB_HOST: db
+      DB_PORT: "3306"
+      DB_NAME: rmlm
+      DB_USER: rmlm
+      DB_PASSWORD: ${MYSQL_PASSWORD}
       RMLM_JWT_SECRET: ${RMLM_JWT_SECRET:?请在 .env 中设置}
       RMLM_ADMIN_USER: ${RMLM_ADMIN_USER:-admin}
       RMLM_ADMIN_PASSWORD: ${RMLM_ADMIN_PASSWORD:?请在 .env 中设置}
+      # 金蝶 K3 Cloud（只读）：在 .env 中填写，不填则只走手工录入 / Excel 导入
+      K3_SERVER_URL: ${K3_SERVER_URL:-}
+      K3_ACCT_ID: ${K3_ACCT_ID:-}
+      K3_APP_ID: ${K3_APP_ID:-}
+      K3_APP_SECRET: ${K3_APP_SECRET:-}
+      K3_USERNAME: ${K3_USERNAME:-}
+      K3_LCID: ${K3_LCID:-2052}
+      K3_LOGIN_TIMEOUT: ${K3_LOGIN_TIMEOUT:-30}
+      K3_QUERY_TIMEOUT: ${K3_QUERY_TIMEOUT:-120}
+      K3_VIEW_TIMEOUT: ${K3_VIEW_TIMEOUT:-60}
+      K3_PAGE_RETRIES: ${K3_PAGE_RETRIES:-3}
+      K3_PAGE_RETRY_SECONDS: ${K3_PAGE_RETRY_SECONDS:-10}
     volumes:
       - photos:/data/photos   # 照片永久保存，请纳入备份
     ports:

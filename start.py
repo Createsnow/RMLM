@@ -51,14 +51,16 @@ def load_env() -> dict:
     env_file = ROOT / ".env"
     if not env_file.exists():
         shutil.copyfile(ROOT / ".env.example", env_file)
-        say(f"已生成 .env（默认连接本机 MySQL 的 rmlm 库），如需修改数据库地址请编辑 {env_file}")
+        say(f"已生成 .env（默认连接本机 MySQL 的 rmlm 库），数据库与金蝶连接请编辑 {env_file}")
     env = os.environ.copy()
     for raw in env_file.read_text(encoding="utf-8").splitlines():
         line = raw.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, value = line.split("=", 1)
-        value = value.strip().strip('"').strip("'")
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]  # 只去掉成对的外层引号，密码里的引号、# = 等字符原样保留
         env.setdefault(key.strip(), value)  # 命令行里已设置的环境变量优先
     env.setdefault("RMLM_PHOTO_DIR", str(BACKEND / "data" / "photos"))
     env.setdefault("RMLM_STATIC_DIR", str(FRONTEND / "dist"))
@@ -115,7 +117,7 @@ except Exception as e:
 
 def check_db(env: dict) -> None:
     if subprocess.run([str(VENV_PY), "-c", DB_CHECK], cwd=BACKEND, env=env).returncode != 0:
-        fail("连不上数据库。请确认 MySQL 已启动、库已创建，并检查 .env 里的 RMLM_DATABASE_URL")
+        fail("连不上数据库。请确认 MySQL 已启动、库已创建，并检查 .env 里的 DB_HOST / DB_PORT / DB_NAME / DB_USER / DB_PASSWORD")
 
 
 def check_port(host: str, port: int) -> None:

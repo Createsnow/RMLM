@@ -34,7 +34,7 @@ docker compose up -d --build
 
 ## 本地一键启动
 
-前提：已安装 Python 3.11+、Node.js 18+，本机有 MySQL 8，并已建好库（默认库名 `rmlm`、账号 `rmlm`，可在 `.env` 里改）。
+前提：已安装 Python 3.11+、Node.js 18+，有可连接的 MySQL 8，并已建好库（默认本机、库名 `rmlm`、账号 `rmlm`，在 `.env` 的 `DB_HOST` 等项里改）。
 
 在仓库根目录运行（Windows、macOS、Linux 命令相同；Mac/Linux 上 `python` 可能叫 `python3`）：
 
@@ -52,7 +52,7 @@ python start.py rebuild    # 改了前端代码后：重建前端再启动
 - 检查数据库能否连上、端口是否被占用，有问题给出中文提示；
 - 启动服务。启动后访问 `http://localhost:8000`，手机在同一局域网内用 `http://电脑IP:8000` 访问。
 
-数据库地址、端口、管理员账号等都在 `.env` 里改。
+数据库（`DB_*`）、金蝶连接（`K3_*`）、管理员账号等都在 `.env` 里改。
 
 可选：写入演示数据（虚构人员，密码 `Demo@1234`）：
 
@@ -81,10 +81,15 @@ RMLM_DATABASE_URL="mysql+pymysql://rmlm:密码@127.0.0.1:3306/rmlm_test?charset=
 
 | 变量 | 说明 | 默认 |
 |---|---|---|
-| `RMLM_DATABASE_URL` | MySQL 连接串 | 本机 rmlm 库 |
+| `DB_HOST` / `DB_PORT` / `DB_NAME` / `DB_USER` / `DB_PASSWORD` | MySQL 连接（分项填写，密码可含特殊字符） | 127.0.0.1 / 3306 / rmlm / rmlm / rmlm_dev |
+| `RMLM_DATABASE_URL` | 完整 MySQL 连接串；设置后优先于上面的 `DB_*` | 空 |
 | `RMLM_JWT_SECRET` | 登录令牌签名密钥 | 开发用值，生产必须修改 |
 | `RMLM_JWT_HOURS` | 登录有效期（小时） | 12 |
 | `RMLM_PHOTO_DIR` | 照片目录（永久保存） | `./data/photos` |
 | `RMLM_PHOTO_MAX_KB` | 照片压缩目标大小 | 300 |
 | `RMLM_SCHEDULER` | 是否启动定时任务（1/0） | 1 |
 | `RMLM_ADMIN_USER` / `RMLM_ADMIN_PASSWORD` | 首次启动时创建的管理员 | admin / admin123 |
+| `K3_SERVER_URL` / `K3_ACCT_ID` / `K3_APP_ID` / `K3_APP_SECRET` / `K3_USERNAME` | 金蝶 K3 Cloud 连接（只读）；五项填全才启用 | 空 |
+| `K3_LCID` | 金蝶语言，2052 = 简体中文 | 2052 |
+| `K3_LOGIN_TIMEOUT` / `K3_QUERY_TIMEOUT` / `K3_VIEW_TIMEOUT` | 金蝶登录 / 查询 / 查看单据超时（秒） | 30 / 120 / 60 |
+| `K3_PAGE_RETRIES` / `K3_PAGE_RETRY_SECONDS` | 金蝶分页查询失败重试次数 / 间隔（秒） | 3 / 10 |
