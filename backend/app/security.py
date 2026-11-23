@@ -1,4 +1,4 @@
-"""账号密码登录 + JWT。不依赖企业微信。"""
+"""登录凭证：JWT。登录方式有两种：企业微信网页授权（手机端，见 services/wecom.py）和账号密码（电脑端 / 未配置企微时）。"""
 import time
 
 import bcrypt

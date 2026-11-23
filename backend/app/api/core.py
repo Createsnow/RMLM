@@ -1,7 +1,7 @@
 """登录、账号与组织、代理、主数据、字典、待办、照片、审计、定时任务手动触发。"""
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, File, UploadFile
+from fastapi import APIRouter, Depends, File, Request, UploadFile
 from fastapi.responses import FileResponse
 from openpyxl import load_workbook
 from pydantic import BaseModel
@@ -17,7 +17,8 @@ from ..models import (AuditLog, Delegate, DictChange, DictItem, Freeze, LedgerLi
 from ..perms import ROLES, ancestors, descendants, has_role, require_role, validate_delegate
 from ..security import current_user, hash_password, make_token, verify_password
 from ..services import erp as erpsvc
-from ..services import jobs, ledger
+from ..services import jobs, ledger, master_sync, wecom
+from ..services.k3cloud import K3Error
 from ..services.common import close_todos, notify
 from ..services.photos import save_photo
 from .serial import get_or_404, s, user_out
@@ -36,6 +37,29 @@ def login(body: LoginIn, db: Session = Depends(get_db)):
     u = db.scalar(select(User).where(User.username == body.username.strip()))
     if not u or not u.active or not verify_password(body.password, u.password_hash):
         raise BizError("账号或密码错误", 401)
+    return {"token": make_token(u), "user": user_out(u, db)}
+
+
+# ------------------------------------------------------------------ 企业微信登录（网页授权）
+@router.get("/auth/config")
+def auth_config():
+    """登录页用：是否启用企业微信登录。"""
+    return {"wecom": settings.wecom_enabled}
+
+
+@router.get("/auth/wecom/url")
+def wecom_login_url(request: Request, next: str = "/m"):
+    """企微内打开时，前端跳转到这个授权地址；授权后回到 /login?code=…"""
+    return wecom.login_url(next, str(request.base_url))
+
+
+class WecomLoginIn(BaseModel):
+    code: str
+
+
+@router.post("/auth/wecom")
+def wecom_login(body: WecomLoginIn, db: Session = Depends(get_db)):
+    u = wecom.login_by_code(db, body.code.strip())
     return {"token": make_token(u), "user": user_out(u, db)}
 
 
@@ -90,6 +114,7 @@ class UserIn(BaseModel):
     roles: list[str] = ["USER"]
     password: str | None = None
     active: bool = True
+    wecom_userid: str | None = None
 
 
 def _apply_user(db: Session, u: User, body: UserIn) -> None:
@@ -103,7 +128,11 @@ def _apply_user(db: Session, u: User, body: UserIn) -> None:
             raise BizError("直属上级不存在")
         if u.id and (body.manager_id == u.id or body.manager_id in descendants(db, u.id)):
             raise BizError("直属上级不能是本人或其下属")
+    wx = (body.wecom_userid or "").strip() or None
+    if wx and db.scalar(select(User.id).where(User.wecom_userid == wx, User.id != (u.id or 0))):
+        raise BizError(f"企业微信账号 {wx} 已绑定到其他账号")
     u.name, u.title, u.emp_no, u.manager_id = body.name.strip(), body.title, body.emp_no, body.manager_id
+    u.wecom_userid = wx
     u.roles = ",".join(sorted(roles))
 
 
@@ -134,10 +163,9 @@ def update_user(uid: int, body: UserIn, user: User = Depends(current_user), db: 
 
 
 def _clearance(db: Session, u: User) -> list[dict]:
-    lines = list(db.scalars(select(LedgerLine).where(LedgerLine.holder_id == u.id, LedgerLine.voided.is_(False))))
-    calcs = ledger.load(db, lines)
-    return [{"id": l.id, "code": l.code, "balance": s(calcs[l.id].balance)} for l in lines
-            if calcs[l.id].balance > 0 or not l.signed]
+    left = wecom.open_lines(db, u.id)
+    calcs = ledger.load(db, left)
+    return [{"id": l.id, "code": l.code, "balance": s(calcs[l.id].balance)} for l in left]
 
 
 def _check_clearance(db: Session, u: User) -> None:
@@ -148,7 +176,7 @@ def _check_clearance(db: Session, u: User) -> None:
 
 @router.get("/users/{uid}/clearance")
 def clearance(uid: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
-    """离职 / 调岗检查：名下结存必须清零。可供 HR 流程调用。"""
+    """离职 / 调岗检查：名下结存必须清零。停用账号、企微通讯录同步离职人员时都会执行。"""
     u = get_or_404(db, User, uid, "账号")
     if not (has_role(user, "ADMIN", "DEPT_HEAD", "VP") or u.manager_id == user.id or u.id == user.id):
         raise forbid()
@@ -173,7 +201,8 @@ def unfreeze(uid: int, user: User = Depends(current_user), db: Session = Depends
 
 @router.post("/users/import")
 def import_users(file: UploadFile = File(...), user: User = Depends(current_user), db: Session = Depends(get_db)):
-    """批量建号（可选）。列：序号 | 岗位 | 姓名 | 直属上级 | 账号 | 角色(逗号分隔代码)。角色列为空时只开使用人。"""
+    """批量建号（可选）。列：序号 | 岗位 | 姓名 | 直属上级 | 账号 | 角色(逗号分隔代码) | 企微UserID。
+    角色列为空时只开使用人；企微 UserID 可空，之后由通讯录同步按姓名自动绑定。"""
     require_role(user, "ADMIN")
     ws = load_workbook(file.file, read_only=True, data_only=True).active
     rows = [r for r in ws.iter_rows(min_row=2, values_only=True) if r and r[2]]
@@ -185,8 +214,11 @@ def import_users(file: UploadFile = File(...), user: User = Depends(current_user
             continue
         username = str(r[4]).strip() if len(r) > 4 and r[4] else name
         roles = {x.strip() for x in str(r[5]).split(",")} if len(r) > 5 and r[5] else set()
+        wx = str(r[6]).strip() if len(r) > 6 and r[6] else None
+        if wx and db.scalar(select(User.id).where(User.wecom_userid == wx)):
+            wx = None
         u = User(username=username, name=name, title=str(r[1] or ""), password_hash=hash_password("Rmlm@123456"),
-                 roles=",".join(sorted((roles & set(ROLES)) | {"USER"})), must_change_pw=True)
+                 roles=",".join(sorted((roles & set(ROLES)) | {"USER"})), must_change_pw=True, wecom_userid=wx)
         db.add(u)
         by_name[name] = u
         created += 1
@@ -274,12 +306,16 @@ def save_project(body: ProjectIn, user: User = Depends(current_user), db: Sessio
 
 
 @router.get("/materials")
-def materials(q: str = "", user: User = Depends(current_user), db: Session = Depends(get_db)):
+def materials(q: str = "", include_inactive: bool = False, user: User = Depends(current_user),
+              db: Session = Depends(get_db)):
     stmt = select(Material).order_by(Material.code)
     if q:
         stmt = stmt.where(or_(Material.code.like(f"%{q}%"), Material.name.like(f"%{q}%"), Material.spec.like(f"%{q}%")))
+    if not include_inactive:
+        stmt = stmt.where(Material.active.is_(True))
     return [{"id": m.id, "code": m.code, "name": m.name, "spec": m.spec, "unit": m.unit,
-             "unit_price": s(m.unit_price), "category": m.category} for m in db.scalars(stmt.limit(200))]
+             "unit_price": s(m.unit_price), "category": m.category, "active": m.active,
+             "erp_id": m.erp_id, "synced_at": s(m.synced_at)} for m in db.scalars(stmt.limit(200))]
 
 
 class MaterialIn(BaseModel):
@@ -307,6 +343,22 @@ def import_master(kind: str, file: UploadFile = File(...), user: User = Depends(
     if kind not in ("project", "material"):
         raise not_found()
     return {"count": erpsvc.import_master_xlsx(db, user, kind, file.file)}
+
+
+@router.get("/master/sync/status")
+def master_sync_status(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """金蝶物料同步状态：是否已配置接口、最近同步时间与结果。"""
+    return master_sync.status(db)
+
+
+@router.post("/master/sync/material")
+def master_sync_material(full: bool = False, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """立即从金蝶同步物料。默认增量（按修改日期），full=true 全量。"""
+    require_role(user, "KEEPER", "ADMIN")
+    try:
+        return master_sync.sync_materials(db, full=full)
+    except K3Error as e:
+        raise BizError(str(e), 502)
 
 
 @router.get("/locations")
@@ -452,6 +504,22 @@ def audit(limit: int = 200, user: User = Depends(current_user), db: Session = De
     return [{"id": a.id, "user": names.get(a.user_id), "method": a.method, "path": a.path, "status": a.status,
              "body": a.body, "ip": a.ip, "at": s(a.at)}
             for a in db.scalars(select(AuditLog).order_by(AuditLog.id.desc()).limit(min(limit, 1000)))]
+
+
+@router.get("/admin/wecom/status")
+def wecom_status(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    require_role(user, "ADMIN")
+    return wecom.status(db)
+
+
+@router.post("/admin/wecom/sync-contacts")
+def wecom_sync_contacts(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """立即从企业微信同步通讯录（人员、职务、直属上级、离职）。"""
+    require_role(user, "ADMIN")
+    try:
+        return wecom.run_sync(db)
+    except wecom.WeComError as e:
+        raise BizError(str(e), 502)
 
 
 @router.post("/admin/jobs/{name}")

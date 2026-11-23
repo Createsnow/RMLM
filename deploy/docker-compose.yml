@@ -34,18 +34,26 @@ services:
       RMLM_JWT_SECRET: ${RMLM_JWT_SECRET:?请在 .env 中设置}
       RMLM_ADMIN_USER: ${RMLM_ADMIN_USER:-admin}
       RMLM_ADMIN_PASSWORD: ${RMLM_ADMIN_PASSWORD:?请在 .env 中设置}
-      # 金蝶 K3 Cloud（只读）：在 .env 中填写，不填则只走手工录入 / Excel 导入
+      RMLM_PUBLIC_URL: ${RMLM_PUBLIC_URL:-}
+      # 金蝶云星空 WebAPI（只读）；容器须能访问金蝶内网地址。不填则物料用 Excel 导入
       K3_SERVER_URL: ${K3_SERVER_URL:-}
       K3_ACCT_ID: ${K3_ACCT_ID:-}
+      K3_USERNAME: ${K3_USERNAME:-}
       K3_APP_ID: ${K3_APP_ID:-}
       K3_APP_SECRET: ${K3_APP_SECRET:-}
-      K3_USERNAME: ${K3_USERNAME:-}
       K3_LCID: ${K3_LCID:-2052}
+      K3_USE_ORG: ${K3_USE_ORG:-100}
       K3_LOGIN_TIMEOUT: ${K3_LOGIN_TIMEOUT:-30}
       K3_QUERY_TIMEOUT: ${K3_QUERY_TIMEOUT:-120}
       K3_VIEW_TIMEOUT: ${K3_VIEW_TIMEOUT:-60}
       K3_PAGE_RETRIES: ${K3_PAGE_RETRIES:-3}
       K3_PAGE_RETRY_SECONDS: ${K3_PAGE_RETRY_SECONDS:-10}
+      # 企业微信自建应用
+      WECOM_CORP_ID: ${WECOM_CORP_ID:-}
+      WECOM_AGENT_ID: ${WECOM_AGENT_ID:-}
+      WECOM_SECRET: ${WECOM_SECRET:-}
+      WECOM_CONTACT_SECRET: ${WECOM_CONTACT_SECRET:-}
+      WECOM_ROOT_DEPT: ${WECOM_ROOT_DEPT:-1}
     volumes:
       - photos:/data/photos   # 照片永久保存，请纳入备份
     ports:

@@ -26,7 +26,8 @@ def user_out(u: User | None, db: Session | None = None) -> dict | None:
     if u is None:
         return None
     d = {"id": u.id, "username": u.username, "name": u.name, "title": u.title, "emp_no": u.emp_no,
-         "manager_id": u.manager_id, "roles": sorted(u.role_set), "active": u.active, "frozen": u.frozen}
+         "manager_id": u.manager_id, "roles": sorted(u.role_set), "active": u.active, "frozen": u.frozen,
+         "wecom_userid": u.wecom_userid}
     if db is not None:
         d["manager_name"] = u.manager.name if u.manager else None
         d["is_manager"] = is_manager(db, u)

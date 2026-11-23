@@ -16,6 +16,7 @@ from sqlalchemy import (
     Integer,
     Numeric,
     String,
+    Index,
     Text,
     UniqueConstraint,
 )
@@ -46,9 +47,12 @@ class User(Base):
     frozen: Mapped[bool] = mapped_column(Boolean, default=False)
     password_hash: Mapped[str] = mapped_column(String(128))
     must_change_pw: Mapped[bool] = mapped_column(Boolean, default=True)
+    wecom_userid: Mapped[str | None] = mapped_column(String(64))  # 企业微信 UserID，用于免密登录、通讯录同步、消息推送
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
 
     manager: Mapped["User | None"] = relationship(remote_side=[id])
+
+    __table_args__ = (Index("ux_users_wecom_userid", "wecom_userid", unique=True),)
 
     @property
     def role_set(self) -> set[str]:
@@ -98,7 +102,10 @@ class Material(Base):
     spec: Mapped[str | None] = mapped_column(String(255))
     unit: Mapped[str] = mapped_column(String(16))
     unit_price: Mapped[Decimal | None] = mapped_column(Money)  # 从 ERP 同步
-    category: Mapped[str | None] = mapped_column(String(32))
+    category: Mapped[str | None] = mapped_column(String(64))  # 金蝶物料分组
+    active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="1")  # 金蝶已禁用的物料置 False：保留历史引用，不能再申请
+    erp_id: Mapped[int | None] = mapped_column(Integer)  # 金蝶物料内码 FMaterialId
+    synced_at: Mapped[datetime | None] = mapped_column(DateTime)  # 最近一次从金蝶同步的时间
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now, onupdate=_now)
 
 
@@ -389,6 +396,9 @@ class Todo(Base):
     state: Mapped[str] = mapped_column(String(16), default="OPEN")  # OPEN / DONE / CANCELLED
     parent_id: Mapped[int | None] = mapped_column(Integer)
     escalated: Mapped[int] = mapped_column(Integer, default=0)
+    # 企业微信推送：None 不推送（未启用或本人没有企微账号）/ PENDING 待发 / SENT 已发 / FAIL 多次失败放弃
+    push_state: Mapped[str | None] = mapped_column(String(8), index=True)
+    push_tries: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
     done_at: Mapped[datetime | None] = mapped_column(DateTime)
 
@@ -419,4 +429,5 @@ class JobRun(Base):
     __tablename__ = "job_run"
     name: Mapped[str] = mapped_column(String(32), primary_key=True)
     last_run_at: Mapped[datetime | None] = mapped_column(DateTime)
-    last_key: Mapped[str | None] = mapped_column(String(32))  # 已执行过的周期标识（周/季/月）
+    last_key: Mapped[str | None] = mapped_column(String(32))  # 已执行过的周期标识（周/季/月），或同步任务的增量水位
+    last_result: Mapped[str | None] = mapped_column(Text)  # 最近一次执行结果（同步任务用，JSON 文本）
