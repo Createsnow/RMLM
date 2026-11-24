@@ -5,18 +5,18 @@
 :root{
   --bg:#f5f7fa; --surface:#ffffff; --fg:#16202c; --muted:#5a6676; --line:#cdd5df;
   --lane:#eceff4; --accent:#1d5fbf; --accent-soft:#e4edfb; --erp:#a8620a; --erp-soft:#fbefdc;
-  --new:#0f7a6c; --new-soft:#e2f4f0;
+  --new:#0f7a6c; --new-soft:#e2f4f0; --wms:#6a4fb3; --wms-soft:#efeafb;
   --f-body:"PingFang SC","Microsoft YaHei","Noto Sans SC","Hiragino Sans GB",system-ui,sans-serif;
   --f-mono:ui-monospace,"SF Mono",Consolas,monospace;
 }
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
   --bg:#10151b; --surface:#1a2129; --fg:#e5eaf0; --muted:#98a4b2; --line:#36414e;
   --lane:#151b22; --accent:#73a6f2; --accent-soft:#1b2a3f; --erp:#e3a550; --erp-soft:#322717;
-  --new:#4fc7b4; --new-soft:#15302c; color-scheme:dark}}
+  --new:#4fc7b4; --new-soft:#15302c; --wms:#b39cf0; --wms-soft:#261f3a; color-scheme:dark}}
 :root[data-theme="dark"]{
   --bg:#10151b; --surface:#1a2129; --fg:#e5eaf0; --muted:#98a4b2; --line:#36414e;
   --lane:#151b22; --accent:#73a6f2; --accent-soft:#1b2a3f; --erp:#e3a550; --erp-soft:#322717;
-  --new:#4fc7b4; --new-soft:#15302c; color-scheme:dark}
+  --new:#4fc7b4; --new-soft:#15302c; --wms:#b39cf0; --wms-soft:#261f3a; color-scheme:dark}
 body{background:var(--bg);color:var(--fg);font-family:var(--f-body);line-height:1.65}
 .wrap{max-width:1120px;margin:0 auto;padding-block:32px 56px;
   padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
@@ -28,7 +28,7 @@ h2{font-size:18px;margin:0 0 4px;text-wrap:balance}
 section{display:grid;gap:10px;min-width:0}
 .scroll{overflow-x:auto;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px}
 .scroll svg{display:block;width:100%;height:auto}
-#arch{min-width:780px} #flow{min-width:1076px}
+#arch{min-width:780px} #flow{min-width:1240px}
 .cap{color:var(--muted);font-size:13px;margin:0;max-width:80ch}
 ul.bounds{margin:0;padding-left:1.2em;display:grid;gap:6px;max-width:80ch}
 ul.bounds b{color:var(--fg)}
@@ -72,6 +72,14 @@ svg text{font-family:var(--f-body);fill:var(--fg)}
 .n-new{fill:var(--new-soft);stroke:var(--new);stroke-width:1.4}
 .n-sys{fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.3}
 .n-erp{fill:var(--erp-soft);stroke:var(--erp);stroke-width:1.3}
+.n-wms{fill:var(--wms-soft);stroke:var(--wms);stroke-width:1.3}
+.n-wx{fill:var(--surface);stroke:var(--accent);stroke-width:1.2;stroke-dasharray:4 3}
+.nw{font-size:10px;font-weight:700;fill:var(--accent)}
+.lanes0,.lanes1{fill:var(--accent-soft);fill-opacity:.5}
+.lanes1{fill-opacity:.3}
+.lanesep2{stroke:var(--accent);stroke-width:1.6}
+.lanetsys{fill:var(--accent)}
+.lanesub{font-size:10.5px;fill:var(--muted);letter-spacing:.1em}
 .nt{font-size:12.5px;font-weight:700}
 .ns{font-size:10.5px;fill:var(--muted)}
 </style>
@@ -187,8 +195,8 @@ svg text{font-family:var(--f-body);fill:var(--fg)}
 
 <section>
   <h2>二、业务主流程</h2>
-  <div class="scroll"><svg id="flow" role="img" aria-label="业务主流程泳道图：从提需求到月度关账，签收与使用两个节点为本次改动"></svg></div>
-  <p class="cap">图中只画主路径，绿色为本次改动的节点。物料在仓库入库时已由仓储系统赋码贴标（B1），系统生成领用行时只有行号，使用人签收时扫实物上的仓储码，校验“码在仓储清单里、物料一致、数量一致、没挂过别的行”后绑定（B2）。签收有两条路，进同一套校验：扫码是主路径；标签破损、未赋码或批量交接时扫或输入 ERP 单据号，系统列出这张单上属于本人的行，逐行确认签收，没有“整单全选”；这样签收的行记为“待绑仓储码”，事后补扫，计入码绑定率。拆分时逐张扫仓储预发的新标签，拆出的每份和余量各绑一张，原码立即失效。使用登记按去向卡附加要求：D01 必须填出货单号，D03 必须选产线工位，D02 送实验室后 30 天未回填结论进预警待办。转交的受让人不在通讯录时标“外部·待认领”，持有人和责任不变，由领料专员指派到账号后再走受让人确认。其余与 v1 相同：开单过账后系统自动拉单建行；定时任务巡检超时、超期、冻结、差异并按三级升级推送企微。</p>
+  <div class="scroll"><svg id="flow" role="img" aria-label="业务主流程泳道图：上面四条泳道是人员（使用人、直属上级、领料专员、财务与 IT），下面四条是系统（企业微信、RMLM 中台、金蝶 ERP、仓储系统），从提需求到月度关账"></svg></div>
+  <p class="cap">泳道分两组：上面四条是人，下面四条是系统（企业微信、RMLM 中台、金蝶 ERP、仓储系统）。人工步骤里的蓝字标出在哪个系统里操作：使用人和直属上级在企微 H5（PDA 扫码枪也可），领料专员开单在金蝶，认领差异和关账在电脑端。虚线是系统自动拉取数据（金蝶单据每 15 分钟、仓储赋码清单每 15 分钟），绿色为本次改动的节点。图中只画主路径。物料在仓库入库时已由仓储系统赋码贴标（B1），系统生成领用行时只有行号，使用人签收时扫实物上的仓储码，校验“码在仓储清单里、物料一致、数量一致、没挂过别的行”后绑定（B2）。签收有两条路，进同一套校验：扫码是主路径；标签破损、未赋码或批量交接时扫或输入 ERP 单据号，系统列出这张单上属于本人的行，逐行确认签收，没有“整单全选”；这样签收的行记为“待绑仓储码”，事后补扫，计入码绑定率。拆分时逐张扫仓储预发的新标签，拆出的每份和余量各绑一张，原码立即失效。使用登记按去向卡附加要求：D01 必须填出货单号，D03 必须选产线工位，D02 送实验室后 30 天未回填结论进预警待办。转交的受让人不在通讯录时标“外部·待认领”，持有人和责任不变，由领料专员指派到账号后再走受让人确认。其余与 v1 相同：开单过账后系统自动拉单建行；定时任务巡检超时、超期、冻结、差异并按三级升级推送企微。</p>
 </section>
 
 <section>
@@ -241,34 +249,50 @@ svg text{font-family:var(--f-body);fill:var(--fg)}
 
 <script>
 (function(){
-  var LANES=["使用人","直属上级","领料专员","系统（中台）","金蝶 ERP","财务 + IT"];
-  var LW=96, CW=108, BW=96, BH=58, LH=84, COLS=9;
+  // 泳道分两组：0–3 是人，4–7 是系统
+  var LANES=["使用人","直属上级","领料专员","财务 + IT","企业微信","RMLM 中台","金蝶 ERP","仓储系统"], SYS=4;
+  var LW=96, CW=108, BW=96, BH=64, LH=84, COLS=11;
   var W=LW+COLS*CW+8, H=LANES.length*LH;
+  // [泳道, 列, 标题, 说明行, 在哪个系统操作（人工步骤）, 本次改动]
   var N={
-    n1:[0,0,"提需求",["项目从 ERP 选","原因 R01–R06"]],
-    n2:[1,0,"审核",["同意或驳回","4h 提醒·24h 升级"]],
-    n3:[2,1,"开领料单",["在金蝶开单","备注写申请号"]],
-    n4:[4,1,"领料出库",["QTCK 过账"]],
-    n5:[3,2,"自动生成领用行",["按申请号匹配","只有行号 · S0"],1],
-    n6:[0,3,"扫仓储码签收",["绑定码·逐行确认","不许代签 · S1"],1],
-    n7:[0,4,"使用与流转",["拆分扫仓储新标签","去向·外部受让"],1],
-    n8:[0,5,"退库/报废登记",["登记即扣结存","S6 待开单"]],
-    n9:[2,5,"开退料/报废单",["报废每周按箱","批次开单"]],
-    n10:[4,5,"退料·报废出库",["QTRK·报废单"]],
-    n11:[3,6,"分摊到行",["先进先出","S7 已结案"]],
-    n12:[3,7,"每日对账",["单号+行号+数量","差额进差异池"]],
-    n13:[2,7,"认领差异",["48h 内处理","超时升级"]],
-    n14:[5,8,"关闭与关账",["选原因码","每月 3 日前"]]
+    n1:[0,0,"提需求",["项目从 ERP 选","原因 R01–R06"],"企微 H5"],
+    w1:[7,0,"入库赋码贴标",["仓储统一赋码","B1 已赋码"]],
+    s1:[5,1,"生成申请",["待直属上级审核"]],
+    x1:[4,1,"推送审核待办",["4h 提醒·24h 升级"]],
+    n2:[1,2,"审核",["同意或驳回"],"企微 H5"],
+    n3:[2,3,"开领料单",["备注写申请号"],"金蝶"],
+    e1:[6,3,"领料出库",["QTCK 过账"]],
+    w2:[7,3,"实物出库",["仓储码随实物走"]],
+    s2:[5,4,"自动生成领用行",["按申请号匹配","只有行号 · S0"],null,1],
+    x2:[4,4,"推送签收待办",["点开直达本行"]],
+    n4:[0,5,"扫仓储码签收",["绑定码·逐行确认","不许代签 · S1"],"企微 H5 / PDA",1],
+    n5:[0,6,"使用与流转",["去向校验·拆分换码","转交需确认"],"企微 H5",1],
+    n6:[0,7,"退库/报废登记",["登记即扣结存","S6 待开单"],"企微 H5"],
+    n7:[2,7,"开退料/报废单",["多行并一单","报废每周按箱"],"金蝶"],
+    e2:[6,7,"退料·报废出库",["QTRK·报废单"]],
+    w3:[7,7,"实物归位",["退库入仓·报废入箱"]],
+    s3:[5,8,"分摊到行",["先进先出","S7 已结案"]],
+    s4:[5,9,"每日对账",["单号+行号+数量","差额进差异池"]],
+    x3:[4,9,"差异派单",["48h 升级上级"]],
+    n8:[2,9,"认领差异",["选原因码·消差"],"电脑端"],
+    n9:[3,10,"关闭与关账",["差异清零才关账","每月 3 日前"],"电脑端"]
   };
-  // 第四项为 1：金蝶单据自动拉取（虚线，表单确认后接入）
-  var E=[["n1","n2"],["n2","n3"],["n3","n4","过账"],["n4","n5","",1],["n5","n6"],["n6","n7"],["n7","n8"],
-         ["n8","n9"],["n9","n10"],["n10","n11","",1],["n11","n12"],["n12","n13"],["n13","n14"]];
-  function bx(id){var n=N[id];return {x:LW+n[1]*CW+7,y:n[0]*LH+13,l:n[0],c:n[1]}}
+  // [起点, 终点, 标注, 虚线=系统自动拉取数据]
+  var E=[["n1","s1"],["s1","x1"],["x1","n2"],["n2","n3"],["n3","e1","过账"],["w1","w2"],
+         ["e1","s2","拉单",1],["w2","s2","赋码清单",1],["s2","x2"],["x2","n4"],["n4","n5"],["n5","n6"],
+         ["n6","n7"],["n7","e2","过账"],["e2","w3"],["e2","s3","拉单",1],["s3","s4"],["s4","x3"],["x3","n8"],["n8","n9"]];
+  function bx(id){var n=N[id];return {x:LW+n[1]*CW+7,y:n[0]*LH+10,l:n[0],c:n[1]}}
   var s='<defs><marker id="ah2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="ah"/></marker></defs>';
   LANES.forEach(function(name,i){
-    s+='<rect x="0" y="'+i*LH+'" width="'+W+'" height="'+LH+'" class="lane'+(i%2)+'"/>';
-    if(i) s+='<line x1="0" x2="'+W+'" y1="'+i*LH+'" y2="'+i*LH+'" class="lanesep"/>';
-    s+='<text x="12" y="'+(i*LH+LH/2+4)+'" class="lanet">'+name+'</text>';
+    var sys=i>=SYS;
+    s+='<rect x="0" y="'+i*LH+'" width="'+W+'" height="'+LH+'" class="'+(sys?'lanes':'lane')+(i%2)+'"/>';
+    if(i) s+='<line x1="0" x2="'+W+'" y1="'+i*LH+'" y2="'+i*LH+'" class="'+(i===SYS?'lanesep2':'lanesep')+'"/>';
+    if(sys){
+      s+='<text x="12" y="'+(i*LH+LH/2-2)+'" class="lanet lanetsys">'+name+'</text>';
+      s+='<text x="12" y="'+(i*LH+LH/2+14)+'" class="lanesub">系统</text>';
+    } else {
+      s+='<text x="12" y="'+(i*LH+LH/2+4)+'" class="lanet">'+name+'</text>';
+    }
   });
   s+='<line x1="'+LW+'" x2="'+LW+'" y1="0" y2="'+H+'" class="lanesep"/>';
   E.forEach(function(e){
@@ -276,20 +300,23 @@ svg text{font-family:var(--f-body);fill:var(--fg)}
     if(a.c===b.c){
       var x=a.x+BW/2;
       d=b.l>a.l ? 'M'+x+','+(a.y+BH)+' V'+(b.y-2) : 'M'+x+','+a.y+' V'+(b.y+BH+2);
-      if(e[2]) s+='<text x="'+(x+6)+'" y="'+((a.y+b.y+BH)/2+4)+'" class="c">'+e[2]+'</text>';
+      if(e[2]) s+='<text x="'+(x+6)+'" y="'+((b.l>a.l?a.y+BH+b.y:a.y+b.y+BH)/2+4)+'" class="c">'+e[2]+'</text>';
     } else {
       var sx=a.x+BW, sy=a.y+BH/2, ty=b.y+BH/2, mx=sx+(CW-BW)/2;
       d=sy===ty ? 'M'+sx+','+sy+' H'+(b.x-2) : 'M'+sx+','+sy+' H'+mx+' V'+ty+' H'+(b.x-2);
+      if(e[2]) s+='<text x="'+(sx+2)+'" y="'+(sy-5)+'" class="c">'+e[2]+'</text>';
     }
     s+='<path d="'+d+'" class="ln'+(e[3]?' dash':'')+'" marker-end="url(#ah2)"/>';
   });
+  var LANECLS={4:'n-wx',5:'n-sys',6:'n-erp',7:'n-wms'};
   Object.keys(N).forEach(function(id){
-    var n=N[id], p=bx(id), cx=p.x+BW/2;
-    var cls=n[4]?'n-new':n[0]===3?'n-sys':n[0]===4?'n-erp':'n-act';
+    var n=N[id], p=bx(id), cx=p.x+BW/2, lines=n[3], where=n[4];
+    var cls=n[5]?'n-new':(LANECLS[n[0]]||'n-act');
     s+='<rect x="'+p.x+'" y="'+p.y+'" width="'+BW+'" height="'+BH+'" rx="7" class="'+cls+'"/>';
-    var ty=n[3].length>1?p.y+20:p.y+26;
+    var block=15+13*lines.length+(where?13:0), ty=p.y+(BH-block)/2+12;
     s+='<text x="'+cx+'" y="'+ty+'" text-anchor="middle" class="nt">'+n[2]+'</text>';
-    n[3].forEach(function(t,i){s+='<text x="'+cx+'" y="'+(ty+17+i*14)+'" text-anchor="middle" class="ns">'+t+'</text>'});
+    lines.forEach(function(t,i){s+='<text x="'+cx+'" y="'+(ty+15+i*13)+'" text-anchor="middle" class="ns">'+t+'</text>'});
+    if(where) s+='<text x="'+cx+'" y="'+(ty+15+lines.length*13)+'" text-anchor="middle" class="nw">在 '+where+'</text>';
   });
   var svg=document.getElementById('flow');
   svg.setAttribute('viewBox','0 0 '+W+' '+H);
