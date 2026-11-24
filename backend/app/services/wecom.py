@@ -2,7 +2,7 @@
 
 按业务蓝图，企微承担四件事：
 1. 身份登录：手机端用网页授权（snsapi_base）免密登录，经手人身份以企微 UserID 为准；
-2. H5 入口：应用主页设为 {RMLM_PUBLIC_URL}/m，挂在企微工作台；
+2. 入口：应用主页设为 {RMLM_PUBLIC_URL}/，挂在企微工作台；点开就是 RMLM 网页（手机 / 电脑企微都可用），前端按屏幕宽度自动选界面；
 3. 通讯录：每天同步人员、职务、直属上级；企微里离职或停用的人在中台停用（名下有结存的先派待办）；
 4. 消息推送：每条站内待办同时推送一条企微应用消息（文本卡片），点开直达对应页面。
 
@@ -161,7 +161,7 @@ def public_base(request_base: str = "") -> str:
 def login_url(next_path: str, request_base: str = "") -> dict:
     """生成企微网页授权地址。回调到前端 /login，由前端拿 code 换登录凭证。"""
     if not next_path.startswith("/") or next_path.startswith("//"):
-        next_path = "/m"
+        next_path = "/"
     state = secrets.token_urlsafe(12)
     redirect = f"{public_base(request_base)}/login?next={quote(next_path, safe='/')}"
     return {"url": make_client().authorize_url(redirect, state), "state": state}
