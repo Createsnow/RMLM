@@ -269,7 +269,8 @@ class LedgerLine(Base):
 
 
 class MaterialCode(Base):
-    """物料码。条码系统上线前由本系统生成临时码（RM 开头），上线后可直接写入仓储条码。"""
+    """领用行上绑定过的物料码。物料码一律取自仓储系统（source=WMS）；
+    RM 开头的是仓储条码上线前本系统发的旧码（source=RM），补绑仓储码后作废（retired）。"""
     __tablename__ = "material_code"
     id: Mapped[int] = mapped_column(primary_key=True)
     code: Mapped[str] = mapped_column(String(32), unique=True)
@@ -279,7 +280,26 @@ class MaterialCode(Base):
     qty_init: Mapped[Decimal] = mapped_column(Qty)
     replaced: Mapped[bool] = mapped_column(Boolean, default=False)  # B4 已拆分替换
     replaced_at: Mapped[datetime | None] = mapped_column(DateTime)
+    source: Mapped[str] = mapped_column(String(8), default="WMS", server_default="RM")  # WMS 仓储码 / RM 旧码
+    retired: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")  # 旧 RM 码已补绑仓储码
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+
+
+class WmsCode(Base):
+    """仓储系统赋码清单（只读镜像）：按接口同步，接口未通时 Excel 导入。
+    material_code 为空的是仓储预发的空白码，只用于拆分换码。"""
+    __tablename__ = "wms_code"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    code: Mapped[str] = mapped_column(String(32), unique=True)
+    material_code: Mapped[str | None] = mapped_column(String(64), index=True)
+    qty: Mapped[Decimal | None] = mapped_column(Qty)
+    unit: Mapped[str | None] = mapped_column(String(16))
+    batch: Mapped[str | None] = mapped_column(String(64))
+    void: Mapped[bool] = mapped_column(Boolean, default=False)  # 仓储侧作废
+    source: Mapped[str] = mapped_column(String(8), default="API")  # API / IMPORT
+    line_id: Mapped[int | None] = mapped_column(ForeignKey("ledger_line.id"))  # 绑到了哪条领用行
+    bound_at: Mapped[datetime | None] = mapped_column(DateTime)
+    synced_at: Mapped[datetime] = mapped_column(DateTime, default=_now, onupdate=_now)
 
 
 class Event(Base):

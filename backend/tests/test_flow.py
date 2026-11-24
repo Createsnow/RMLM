@@ -2,7 +2,7 @@ from datetime import datetime, timedelta
 
 from app import clock
 
-from .helpers import erp_doc, issue, make_req
+from .helpers import blanks, erp_doc, issue, make_req, wms_code
 
 
 # ------------------------------------------------------------------ 申请与审核
@@ -62,7 +62,7 @@ def test_bind_requires_approval_and_sign_rules(org, ref):
     org.ok(org.post("keeper", f"/api/erp/docs/{doc['id']}/posted?posted=true"))
     assert org.post("lead_a", f"/api/lines/{line['id']}/sign", {"photos": [org.photo("lead_a")]}).status_code == 403
     assert org.post("a1", f"/api/lines/{line['id']}/sign", {"photos": []}).status_code == 400
-    out = org.ok(org.post("a1", f"/api/lines/{line['id']}/sign", {"photos": [org.photo("a1")]}))
+    out = org.ok(org.post("a1", f"/api/lines/{line['id']}/sign", {"photos": [org.photo("a1")], "code": wms_code(qty=10)}))
     assert out["status"] == "S1" and out["balance"] == "10"
 
 
@@ -96,10 +96,13 @@ def test_split_conservation_and_codes(org, ref):
     line = issue(org, ref, qty=1)
     lid, old_code = line["id"], line["code"]
     p = org.photo("a1")
-    r = org.post("a1", f"/api/lines/{lid}/split", {"pieces": [0.5, 0.4], "loss_qty": 0.2, "loss_reason": "L1", "photos": [p]})
+    b = blanks(6)
+    r = org.post("a1", f"/api/lines/{lid}/split", {"pieces": [{"qty": 0.5, "code": b[0]}, {"qty": 0.4, "code": b[1]}],
+                                                   "loss_qty": 0.2, "loss_reason": "L1", "photos": [p]})
     assert r.status_code == 400  # 0.5+0.4+0.2 > 1
     out = org.ok(org.post("a1", f"/api/lines/{lid}/split",
-                          {"pieces": [0.4], "loss_qty": 0.3, "loss_reason": "L2", "photos": [p]}))
+                          {"pieces": [{"qty": 0.4, "code": b[0]}], "loss_qty": 0.3, "loss_reason": "L2", "photos": [p],
+                           "remainder_code": b[1]}))
     assert out["balance"] == "0.3" and out["code"] != old_code
     assert out["result"]["remainder"] == "0.300"
     child_code = out["result"]["children"][0]
@@ -109,10 +112,12 @@ def test_split_conservation_and_codes(org, ref):
     child = org.ok(org.get("a1", f"/api/lines/by-code/{child_code}"))
     assert child["level"] == 2 and child["balance"] == "0.4" and child["status"] == "S1"
     # 第二层再拆一次 → 第三层；第三层不能再拆
-    c2 = org.ok(org.post("a1", f"/api/lines/{child['id']}/split", {"pieces": [0.1], "photos": [p]}))
+    c2 = org.ok(org.post("a1", f"/api/lines/{child['id']}/split", {"pieces": [{"qty": 0.1, "code": b[2]}],
+                                                                  "remainder_code": b[3], "photos": [p]}))
     grand = org.ok(org.get("a1", f"/api/lines/by-code/{c2['result']['children'][0]}"))
     assert grand["level"] == 2 and grand["codes"][0]["layer"] == 3
-    r = org.post("a1", f"/api/lines/{grand['id']}/split", {"pieces": [0.05], "photos": [p]})
+    r = org.post("a1", f"/api/lines/{grand['id']}/split", {"pieces": [{"qty": 0.05, "code": b[4]}],
+                                                          "remainder_code": b[5], "photos": [p]})
     assert r.status_code == 400 and "第三层" in r.json()["detail"]
 
 
@@ -233,7 +238,7 @@ def test_urgent_handover_and_resolution(org, ref):
     req = make_req(org, ref, urgent=True, urgent_note="组长甲口头同意 11/2 9:00")
     line = org.ok(org.post("keeper", f"/api/requisitions/{req['id']}/urgent-handover/{req['items'][0]['id']}"))
     assert "紧急·待补" in line["flags"]
-    out = org.ok(org.post("a1", f"/api/lines/{line['id']}/sign", {"photos": [org.photo("a1")]}))
+    out = org.ok(org.post("a1", f"/api/lines/{line['id']}/sign", {"photos": [org.photo("a1")], "code": wms_code(qty=10)}))
     assert out["status"] == "S1"  # 紧急领用无 ERP 单也能签收
     clock.advance(timedelta(hours=25))
     org.ok(org.post("admin", "/api/admin/jobs/quarter_hour"))

@@ -1,7 +1,8 @@
 """扫码统一识别（蓝图 3.1：扫码为主、选单为备，两条路进同一套校验）。
 
-一个入口依次识别：物料码 → ERP 单据号 → 库位码 → 申请号。
-- 物料码：直接带出该行；已拆分替换（B4）的旧码拒绝，提示扫新码。
+一个入口依次识别：物料码（仓储码）→ ERP 单据号 → 库位码 → 申请号。
+- 已绑定的仓储码：直接带出该行；已拆分替换（B4）的旧码拒绝，提示扫新码；旧 RM 码提示改扫仓储码。
+- 还没绑定的仓储码：列出本人可用它签收（待签收）或补绑（待绑仓储码）的同物料行。
 - ERP 单据号（选单号路径）：列出该单各行对应的领用行；签收仍逐行调用 /lines/{id}/sign，
   没有整单签收的接口——"必须逐行确认，不许整单全选"。
 - 库位码：列出放在该库位 / 工位 / 报废箱的在制行。
@@ -11,10 +12,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..errors import BizError
-from ..models import DocAlloc, ErpDoc, ErpLine, Event, LedgerLine, Location, Material, MaterialCode, Requisition, User
+from ..models import (DocAlloc, ErpDoc, ErpLine, Event, LedgerLine, Location, Material, MaterialCode, Requisition, User,
+                      WmsCode)
 from ..perms import can_view_line
 from . import ledger
-from .common import qs
+from .common import D, qs
 
 
 def _brief(db: Session, viewer: User, line: LedgerLine, c) -> dict:
@@ -40,7 +42,15 @@ def resolve(db: Session, viewer: User, raw: str) -> dict:
         return {"kind": "line", "code": code, "line_id": line.id}
     mc = db.scalar(select(MaterialCode).where(MaterialCode.code == code))
     if mc is not None:
+        if mc.retired:
+            cur = db.get(LedgerLine, mc.line_id)
+            raise BizError(f"{code} 是旧的 RM 码，已改用仓储码 {cur.code}，请扫仓储码")
         raise BizError(f"物料码 {code} 已拆分替换（B4），不能再扫；请扫新码")
+
+    # 1b. 仓储赋码清单里、还没绑定的码
+    w = db.scalar(select(WmsCode).where(WmsCode.code == code))
+    if w is not None:
+        return _wms(db, viewer, w)
 
     # 2. ERP 单据号（选单号）
     doc = db.scalar(select(ErpDoc).where(ErpDoc.no == code))
@@ -99,3 +109,33 @@ def _doc(db: Session, viewer: User, doc: ErpDoc) -> dict:
                     "posted": doc.posted},
             "rows": rows, "hidden": hidden,
             "to_sign": sum(1 for r in rows for l in r["lines"] if l["can_sign"])}
+
+
+def _wms(db: Session, viewer: User, w: WmsCode) -> dict:
+    from .wms import bound_codes
+
+    if w.void:
+        raise BizError(f"仓储码 {w.code} 已在仓储系统作废")
+    info = {"code": w.code, "material_code": w.material_code, "qty": qs(w.qty) if w.qty is not None else None,
+            "unit": w.unit, "batch": w.batch, "blank": not w.material_code}
+    m = db.scalar(select(Material).where(Material.code == w.material_code)) if w.material_code else None
+    info["material"] = m.name if m else None
+    cands = []
+    if m is not None:
+        lines = list(db.scalars(select(LedgerLine).where(LedgerLine.material_id == m.id, LedgerLine.voided.is_(False),
+                                                         LedgerLine.holder_id == viewer.id)))
+        calcs = ledger.load(db, lines)
+        bound = bound_codes(db, [l.code for l in lines])
+        for l in lines:
+            c = calcs[l.id]
+            if not l.signed:
+                action = "sign"
+            elif l.code not in bound and c.balance > 0:
+                action = "bind"
+            else:
+                continue
+            d = _brief(db, viewer, l, c)
+            d["action"] = action
+            d["qty_match"] = w.qty is None or D(w.qty) == D(l.qty)
+            cands.append(d)
+    return {"kind": "wms", "code": w.code, "wms": info, "candidates": cands}

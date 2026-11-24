@@ -52,9 +52,14 @@ def dashboard(db: Session, user: User) -> dict:
                                                 Event.etype.notin_(("SIGN", "SPLIT_IN", "REVERSAL")))))
     projects = {p.id: p for p in db.scalars(select(Project))}
     roots = [l for l in lines if l.level == 1]
+    signed = [l for l in lines if l.signed]
+    from .wms import bound_codes
+
+    wms_bound = bound_codes(db, [l.code for l in signed])
     gate = {
         "project_link_rate": _pct(sum(1 for l in roots if projects[l.project_id].source == "ERP"), len(roots)),
-        "code_bind_rate": _pct(sum(1 for l in roots if l.signed and l.code), sum(1 for l in roots if l.signed) or 0),
+        # 码绑定率 = 已绑仓储码的行 / 已签收行（物料码取自仓储系统）
+        "code_bind_rate": _pct(sum(1 for l in signed if l.code in wms_bound), len(signed)),
         "proxy_rate": _pct(sum(1 for e in events if e.is_proxy), len(events)),
     }
     gate["passed"] = (gate["project_link_rate"] in (None, 100.0)
@@ -91,7 +96,7 @@ def dashboard(db: Session, user: User) -> dict:
         "counts": {"lines": len(lines), "active": active, "overdue": overdue, "urgent_pending": urgent,
                    "doc_pending": status_cnt.get("S6", 0), "to_sign": status_cnt.get("S0", 0),
                    "scrap_pending": scrap_wait, "recon_open": recon_open, "today_events": today_events,
-                   "projects": len(by_project), "balance_amount": str(amount.quantize(Decimal("0.01")))},
+                   "projects": len(by_project), "to_bind": len(signed) - len(wms_bound), "balance_amount": str(amount.quantize(Decimal("0.01")))},
         "status": dict(status_cnt),
         "gate": gate,
         "observe": observe(db, lines, calcs),
@@ -174,7 +179,10 @@ def weekly_hanging(db: Session, user: User) -> dict:
     mats = {m.id: m for m in db.scalars(select(Material))}
     projects = {p.id: p for p in db.scalars(select(Project))}
     now = clock.now()
-    out = {"overdue": [], "urgent": [], "hold_30d": [], "doc_pending": [], "lab_pending": [], "level3": []}
+    out = {"overdue": [], "urgent": [], "hold_30d": [], "doc_pending": [], "lab_pending": [], "to_bind": [], "level3": []}
+    from .wms import bound_codes
+
+    wms_bound = bound_codes(db, [l.code for l in lines if l.signed])
     for l in lines:
         c = calcs[l.id]
         st = ledger.status_of(l, c)
@@ -187,6 +195,8 @@ def weekly_hanging(db: Session, user: User) -> dict:
             out["hold_30d"].append(b)
         if st == "S6":
             out["doc_pending"].append(b)
+        if l.signed and c.balance > 0 and l.code not in wms_bound:
+            out["to_bind"].append(b)
     from .lineops import LAB_CONCLUSION_DAYS, lab_pending
 
     by_id = {l.id: l for l in lines}

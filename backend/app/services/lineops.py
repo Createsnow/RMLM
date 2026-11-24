@@ -11,7 +11,8 @@ from ..errors import BizError, forbid
 from ..models import ErpLine, Event, LedgerLine, Location, MaterialCode, User
 from ..perms import active_delegates, default_approver, has_role, proxy_check
 from . import ledger
-from .common import D, add_months, add_todo, close_todos, dict_codes, new_code, notify, users_with_role
+from . import wms
+from .common import D, add_months, add_todo, close_todos, dict_codes, notify, users_with_role
 
 
 def _require_photos(photos: list[int] | None, what: str) -> list[int]:
@@ -44,7 +45,7 @@ def etype_name(t: str) -> str:
         "SIGN": "签收", "CONSUME": "耗用", "SPLIT_OUT": "拆出", "SPLIT_IN": "拆入", "HOLD": "暂存",
         "MOVE": "更新位置", "TRANSFER_REQ": "发起转交", "TRANSFER_OK": "转交确认", "TRANSFER_REJ": "转交拒绝",
         "RETURN": "退库", "SCRAP": "报废", "REVERSAL": "冲销", "QCONFIRM": "季度在用确认",
-        "RENEW": "续期申请", "DUE_CHANGE": "改归还日申请", "CONCLUSION": "回填实验结论",
+        "RENEW": "续期申请", "DUE_CHANGE": "改归还日申请", "CONCLUSION": "回填实验结论", "BIND_CODE": "补绑仓储码",
     }.get(t, t)
 
 
@@ -67,7 +68,9 @@ def _check_qty(qty, balance: Decimal) -> Decimal:
 
 
 # ------------------------------------------------------------------ 签收
-def sign(db: Session, line: LedgerLine, op: User, photos: list[int]) -> Event:
+def sign(db: Session, line: LedgerLine, op: User, photos: list[int], code: str | None = None,
+         no_code_reason: str | None = None) -> Event:
+    """本人签收。扫实物上的仓储码绑定到本行；标签破损、未赋码或批量交接时可不扫码，但必须选原因，事后补绑。"""
     _guard(line, need_signed=False)
     if line.signed:
         raise BizError("该行已签收")
@@ -78,10 +81,41 @@ def sign(db: Session, line: LedgerLine, op: User, photos: list[int]) -> Event:
         if not erp or not erp.doc.posted:
             raise BizError("ERP 单据尚未过账，不能签收")
     _require_photos(photos, "签收")
+    extra = None
+    if (code or "").strip():
+        w = wms.check_for_line(db, code, line)
+        wms.bind(db, w, line, line.qty)
+        line.code = w.code
+    elif no_code_reason in wms.NO_CODE_REASONS:
+        extra = {"no_code": no_code_reason}
+    else:
+        raise BizError("请扫描实物上的仓储码；标签破损、未赋码或批量交接时请选择不扫码的原因")
     line.signed, line.signed_at = True, clock.now()
-    e = _event(db, line, "SIGN", op, qty=line.qty, photos=photos)
+    e = _event(db, line, "SIGN", op, qty=line.qty, photos=photos, extra=extra)
     close_todos(db, "line", line.id, ("SIGN",))
     return e
+
+
+def bind_code(db: Session, line: LedgerLine, op: User, code: str) -> Event:
+    """补绑仓储码：签收时没扫码的行、仓储条码上线前发了 RM 码的行。持有人（或可代登的人）和领料专员可操作。"""
+    _guard(line)
+    if not has_role(op, "KEEPER"):
+        _operator(db, line, op)
+    if wms.bound_codes(db, [line.code]):
+        raise BizError("本行已绑定仓储码")
+    c = ledger.load_one(db, line)
+    if c.balance <= 0:
+        raise BizError("结存为 0，无需补绑")
+    w = wms.check_for_line(db, code, line)
+    old = line.code
+    old_rec = db.scalar(select(MaterialCode).where(MaterialCode.code == old))
+    layer = old_rec.layer if old_rec else 1
+    if old_rec:
+        old_rec.retired = True  # 旧 RM 码作废，再扫会提示改扫仓储码
+    wms.bind(db, w, line, c.balance, layer=layer, parent_code=old_rec.parent_code if old_rec else None)
+    line.code = w.code
+    return _event(db, line, "BIND_CODE", op, op.id != line.holder_id and not has_role(op, "KEEPER"),
+                  extra={"old": old, "new": w.code})
 
 
 # ------------------------------------------------------------------ 使用 / 损耗
@@ -153,56 +187,69 @@ def conclusion(db: Session, target: Event, op: User, text: str, photos: list[int
 
 # ------------------------------------------------------------------ 拆分换码
 def split(db: Session, line: LedgerLine, op: User, pieces: list, loss_qty, loss_reason: str | None,
-          note: str | None, photos: list[int]) -> dict:
+          note: str | None, photos: list[int], remainder_code: str | None = None) -> dict:
+    """拆分换码：拆出的每份、余量各扫一张仓储预发的新标签；原码提交即失效。
+    pieces: [{"qty": 0.4, "code": "仓储码"}, ...]"""
     _guard(line)
     proxy = _operator(db, line, op)
     code_rec = db.scalar(select(MaterialCode).where(MaterialCode.code == line.code))
     if code_rec and code_rec.layer >= 3:
-        raise BizError("物料码已到第三层，不能再拆分；请退库后重新赋码")
+        raise BizError("物料码已到第三层，不能再拆分；请退库后由仓储重新赋码")
     c = ledger.load_one(db, line)
-    ps = [D(p) for p in pieces]
-    if not ps or any(p <= 0 for p in ps):
+    items = []
+    for p in pieces or []:
+        q, code = (D(p.get("qty")), p.get("code")) if isinstance(p, dict) else (D(p), None)
+        items.append((q, (code or "").strip()))
+    if not items or any(q <= 0 for q, _ in items):
         raise BizError("至少拆出一份，且每份数量大于 0")
     loss = D(loss_qty)
     if loss < 0:
         raise BizError("损耗不能为负")
-    remainder = c.balance - sum(ps) - loss
+    total = sum(q for q, _ in items)
+    remainder = c.balance - total - loss
     if remainder < 0:
         raise BizError(f"拆出合计 + 损耗 超过当前结存 {c.balance}")
     if loss > 0 and loss_reason not in dict_codes(db, "LOSS_REASON"):
         raise BizError("有损耗时必须选择损耗原因")
+    # 新码：每份一张，余量一张，都必须是仓储清单里没用过的码
+    codes = [code for _, code in items] + ([(remainder_code or "").strip()] if remainder > 0 else [])
+    if any(not k for k in codes):
+        raise BizError("拆出的每一份" + ("和余量" if remainder > 0 else "") + "都要扫一张仓储预发的新标签")
+    if len(set(codes)) != len(codes):
+        raise BizError("同一张标签不能贴两份")
+    wcodes = [wms.check_for_split(db, k, line) for k in codes]
     _require_photos(photos, "拆分")
     layer = (code_rec.layer if code_rec else 1) + 1
     if loss > 0:
         _event(db, line, "CONSUME", op, proxy, qty=loss, is_loss=True, loss_reason=loss_reason,
                note=note or "拆分时损耗", photos=photos)
-    out = _event(db, line, "SPLIT_OUT", op, proxy, qty=sum(ps), note=note, photos=photos,
-                 extra={"pieces": [str(p) for p in ps], "remainder": str(remainder)})
+    out = _event(db, line, "SPLIT_OUT", op, proxy, qty=total, note=note, photos=photos,
+                 extra={"pieces": [str(q) for q, _ in items], "remainder": str(remainder)})
     now = clock.now()
     parent_id = line.id if line.level == 1 else line.parent_id
     children = []
-    for p in ps:
+    for (q, _), w in zip(items, wcodes):
         child = LedgerLine(
-            code=new_code(db), root_id=line.root_id, parent_id=parent_id, level=2,
+            code=w.code, root_id=line.root_id, parent_id=parent_id, level=2,
             requisition_id=line.requisition_id, req_item_id=line.req_item_id, project_id=line.project_id,
-            material_id=line.material_id, qty=p, unit_price=line.unit_price, user_id=line.user_id,
+            material_id=line.material_id, qty=q, unit_price=line.unit_price, user_id=line.user_id,
             holder_id=line.holder_id, location_id=line.location_id, due_date=line.due_date,
             long_cycle=line.long_cycle, long_cycle_max=line.long_cycle_max, signed=True, signed_at=now,
             urgent=line.urgent, urgent_resolved=True, issued_by=line.issued_by, split_event_id=out.id,
         )
         db.add(child)
         db.flush()
-        db.add(MaterialCode(code=child.code, line_id=child.id, parent_code=line.code, layer=layer, qty_init=p))
-        db.add(Event(line_id=child.id, code=child.code, etype="SPLIT_IN", qty=p, operator_id=op.id,
+        wms.bind(db, w, child, q, layer=layer, parent_code=line.code)
+        db.add(Event(line_id=child.id, code=child.code, etype="SPLIT_IN", qty=q, operator_id=op.id,
                      holder_id=child.holder_id, is_proxy=proxy, photos=photos, extra={"from": line.code}))
         children.append(child)
-    # 原码提交即失效：余量换新码
+    # 原码提交即失效：余量换贴新标签
     if code_rec:
         code_rec.replaced, code_rec.replaced_at = True, now
     old_code = line.code
     if remainder > 0:
-        line.code = new_code(db)
-        db.add(MaterialCode(code=line.code, line_id=line.id, parent_code=old_code, layer=layer, qty_init=remainder))
+        wms.bind(db, wcodes[-1], line, remainder, layer=layer, parent_code=old_code)
+        line.code = wcodes[-1].code
     out.extra = {**(out.extra or {}), "children": [ch.code for ch in children], "new_code": line.code if remainder > 0 else None}
     db.flush()
     return {"children": [ch.code for ch in children], "remainder": str(remainder),

@@ -46,13 +46,14 @@
         <el-button v-if="l.actions.qconfirm" @click="op('qconfirm')">季度在用确认</el-button>
         <el-button v-if="l.actions.renew" @click="op('renew')">续期</el-button>
         <el-button v-if="l.actions.due_change && !l.long_cycle_max" @click="op('due_change')">改归还日</el-button>
-        <el-button @click="$router.push(`/labels?ids=${l.id}`)"><el-icon><Printer /></el-icon>标签</el-button>
+        <el-button v-if="l.actions.bind_code" type="warning" plain @click="op('bind_code')">补绑仓储码</el-button>
       </div>
     </div>
 
     <div class="card">
       <el-descriptions :column="mobile ? 1 : 3" border size="small">
-        <el-descriptions-item label="物料码"><span class="mono">{{ l.code }}</span></el-descriptions-item>
+        <el-descriptions-item label="物料码"><span class="mono">{{ l.code }}</span>
+          <span class="muted"> {{ { WMS: '仓储码', LINE: '行号（未绑仓储码）', RM: '旧 RM 码，待补绑仓储码' }[l.code_kind] }}</span></el-descriptions-item>
         <el-descriptions-item label="项目">{{ l.project }} {{ l.project_name }}</el-descriptions-item>
         <el-descriptions-item label="客户代码">{{ l.customer_code || '—' }}</el-descriptions-item>
         <el-descriptions-item label="领用人">{{ l.user }}</el-descriptions-item>
@@ -88,7 +89,9 @@
             <el-tag v-if="e.reversed" size="small" type="info" style="margin-left: 6px">已冲销</el-tag>
             <el-tag v-if="e.is_proxy" size="small" type="warning" style="margin-left: 6px">代登</el-tag>
             <div class="muted">经手 {{ e.operator }}<span v-if="e.reason"> · {{ e.reason }}</span><span v-if="e.note"> · {{ e.note }}</span>
-              <span v-if="e.extra?.children"> · 新码 {{ e.extra.children.join('、') }}</span></div>
+              <span v-if="e.extra?.children"> · 新码 {{ e.extra.children.join('、') }}</span>
+              <span v-if="e.extra?.no_code"> · 未扫码（{{ e.extra.no_code }}）</span>
+              <span v-if="e.etype === 'BIND_CODE'"> · {{ e.extra.old }} → {{ e.extra.new }}</span></div>
             <PhotoThumbs v-if="e.photos.length" :ids="e.photos" />
             <el-button v-if="l.lab_pending.includes(e.id) && l.actions.conclusion" size="small" type="warning" plain @click="openConclusion(e)">回填实验结论</el-button>
             <el-button v-if="l.actions.reversal && canReverse(e)" size="small" text type="danger" @click="reverse(e)">发起冲销</el-button>
@@ -97,13 +100,14 @@
       </el-timeline>
     </div>
 
-    <div class="card" v-if="l.codes.length > 1 || l.children.length || l.parent_id">
+    <div class="card" v-if="l.codes.length">
       <h3>物料码与拆分关系</h3>
       <el-table :data="l.codes" size="small">
         <el-table-column label="物料码"><template #default="{ row }"><span class="mono">{{ row.code }}</span></template></el-table-column>
         <el-table-column prop="layer" label="层" width="50" />
         <el-table-column label="上级码"><template #default="{ row }"><span class="mono">{{ row.parent_code || '—' }}</span></template></el-table-column>
-        <el-table-column label="码状态" width="130"><template #default="{ row }">{{ dictName('CODE_STATUS', row.state) }}</template></el-table-column>
+        <el-table-column label="来源" width="90"><template #default="{ row }">{{ row.source === 'WMS' ? '仓储' : '旧 RM 码' }}</template></el-table-column>
+        <el-table-column label="码状态" width="130"><template #default="{ row }">{{ row.state === 'RETIRED' ? '已改用仓储码' : dictName('CODE_STATUS', row.state) }}</template></el-table-column>
       </el-table>
       <div v-if="l.children.length" style="margin-top: 10px">子行：
         <router-link v-for="c in l.children" :key="c.id" :to="`${p}/line/${c.id}`" class="mono" style="margin-right: 10px">{{ c.code }}（{{ c.qty }}）{{ c.voided ? '已作废' : '' }}</router-link>
@@ -122,7 +126,7 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
 import { STATUS_TYPE, dictName, fmtMoney } from '../utils'
@@ -133,7 +137,6 @@ import RemoteSelect from '../components/RemoteSelect.vue'
 import BalanceBar from '../components/BalanceBar.vue'
 
 const route = useRoute()
-const router = useRouter()
 const mobile = computed(() => route.path.startsWith('/m'))
 const p = computed(() => mobile.value ? '/m' : '')
 const l = ref(null)
@@ -148,8 +151,7 @@ function op(k) { ops.value.open(k) }
 function onDone(res, kind) {
   l.value = res
   if (kind === 'split' && res.result) {
-    ElMessageBox.confirm(`已生成新码：${res.result.children.join('、')}${res.result.remainder_code ? '，余量新码 ' + res.result.remainder_code : ''}。请打印并粘贴新标签。`, '拆分完成', { confirmButtonText: '打印标签' })
-      .then(() => router.push(`/labels?codes=${[...res.result.children, res.result.remainder_code].filter(Boolean).join(',')}`)).catch(() => {})
+    ElMessageBox.alert(`拆出 ${res.result.children.join('、')}${res.result.remainder_code ? '，余量 ' + res.result.remainder_code : ''}。请确认新标签已贴在对应实物上，原标签撕下作废。`, '拆分完成')
   }
 }
 async function decideTransfer(accept) {

@@ -73,7 +73,7 @@ const menu = computed(() => {
   if (hasRole('KEEPER', 'ADMIN', 'FINANCE')) ops.push({ path: '/reversals', name: '冲销', icon: 'RefreshLeft' })
   if (ops.length) groups.push({ title: '物料作业', items: ops })
   const mg = [{ path: '/reports', name: '报表', icon: 'TrendCharts' }]
-  if (hasRole('KEEPER', 'ADMIN', 'WAREHOUSE')) mg.push({ path: '/master', name: '主数据', icon: 'Box' })
+  if (hasRole('KEEPER', 'ADMIN', 'WAREHOUSE')) mg.push({ path: '/master', name: '主数据', icon: 'Box' }, { path: '/wms', name: '仓储码', icon: 'Postcard' })
   if (hasRole('KEEPER', 'ADMIN', 'FINANCE', 'DEPT_HEAD', 'VP', 'WAREHOUSE')) mg.push({ path: '/history', name: '历史基线', icon: 'Clock' })
   mg.push({ path: '/dicts', name: '字典与规则', icon: 'Collection' })
   if (hasRole('ADMIN')) mg.push({ path: '/users', name: '账号管理', icon: 'UserFilled' }, { path: '/audit', name: '审计日志', icon: 'View' })

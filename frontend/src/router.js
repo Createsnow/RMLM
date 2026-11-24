@@ -20,7 +20,6 @@ const shared = [
 
 const routes = [
   { path: '/login', component: v('Login'), meta: { public: true } },
-  { path: '/labels', component: v('Labels'), meta: { title: '打印标签' } },
   {
     path: '/',
     component: PcLayout,
@@ -34,6 +33,7 @@ const routes = [
       { path: 'returns', redirect: '/dispose' },
       { path: 'scrap', redirect: '/dispose?tab=scrap' },
       { path: 'history', component: v('History'), meta: { title: '历史基线' } },
+      { path: 'wms', component: v('WmsCodes'), meta: { title: '仓储码' } },
       { path: 'recon', component: v('Recon'), meta: { title: '对账与关账' } },
       { path: 'reversals', component: v('Reversals'), meta: { title: '冲销' } },
       { path: 'reports', component: v('Reports'), meta: { title: '报表' } },

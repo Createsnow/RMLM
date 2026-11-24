@@ -73,7 +73,7 @@ def test_pulled_doc_creates_line_and_user_signs_directly(org, ref, reader):
     with dbmod.SessionLocal() as db:
         assert db.scalar(select(ErpDoc).where(ErpDoc.no == "QTCK-0001")).source == "API"
     assert any(t["kind"] == "SIGN" for t in org.ok(org.get("a1", "/api/todos")))
-    out = org.ok(org.post("a1", f"/api/lines/{line.id}/sign", {"photos": [org.photo("a1")]}))
+    out = org.ok(org.post("a1", f"/api/lines/{line.id}/sign", {"photos": [org.photo("a1")], "no_code_reason": "标签破损"}))
     assert out["status"] == "S1"
 
     # 再拉一次：增量、没有变化、不重复生成

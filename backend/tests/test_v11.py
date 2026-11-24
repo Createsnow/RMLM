@@ -6,7 +6,7 @@ from openpyxl import Workbook
 
 from app import clock
 
-from .helpers import erp_doc, issue, make_req
+from .helpers import blanks, erp_doc, issue, make_req, wms_code
 
 
 # ------------------------------------------------------------------ 去向附加要求（蓝图 4.1）
@@ -77,13 +77,17 @@ def test_scan_resolves_codes_docs_locations(org, ref):
     assert other["rows"][0]["lines"] == [] and other["hidden"] == 1
     # 签收仍逐行进行（同一套校验：本人、拍照）
     assert org.post("a2", f"/api/lines/{line['id']}/sign", {"photos": [org.photo("a2")]}).status_code == 403
-    org.ok(org.post("a1", f"/api/lines/{line['id']}/sign", {"photos": [org.photo("a1")]}))
+    org.ok(org.post("a1", f"/api/lines/{line['id']}/sign", {"photos": [org.photo("a1")], "no_code_reason": "批量交接"}))
     assert org.ok(org.get("a1", f"/api/scan/{doc['no']}"))["to_sign"] == 0
+    code = wms_code("M-CABLE", 10)
+    line = org.ok(org.post("a1", f"/api/lines/{line['id']}/bind-code", {"code": code}))
     # 物料码
     assert org.ok(org.get("a1", f"/api/scan/{line['code']}")) == {"kind": "line", "code": line["code"],
                                                                   "line_id": line["id"]}
     # 拆分后旧码失效
-    out = org.ok(org.post("a1", f"/api/lines/{line['id']}/split", {"pieces": [3], "photos": [org.photo("a1")]}))
+    b = blanks(2)
+    out = org.ok(org.post("a1", f"/api/lines/{line['id']}/split", {"pieces": [{"qty": 3, "code": b[0]}],
+                                                                   "remainder_code": b[1], "photos": [org.photo("a1")]}))
     r = org.get("a1", f"/api/scan/{line['code']}")
     assert r.status_code == 400 and "B4" in r.json()["detail"]
     assert org.ok(org.get("a1", f"/api/scan/{out['code']}"))["line_id"] == line["id"]

@@ -126,7 +126,7 @@ import { api } from '../api'
 import { hasRole } from '../store'
 import { fmtMoney } from '../utils'
 
-const W = { overdue: '超期未结案', urgent: '紧急领用超 24 小时未补', hold_30d: '暂存超 30 天', doc_pending: '待单据处置', lab_pending: 'D02 实验结论超 30 天未回填', level3: '三级挂账（提交月度经营会）' }
+const W = { overdue: '超期未结案', urgent: '紧急领用超 24 小时未补', hold_30d: '暂存超 30 天', doc_pending: '待单据处置', lab_pending: 'D02 实验结论超 30 天未回填', to_bind: '待绑仓储码（签收时未扫码 / 旧 RM 码）', level3: '三级挂账（提交月度经营会）' }
 const tab = ref('weekly')
 const weekly = ref(null)
 const projects = ref([])

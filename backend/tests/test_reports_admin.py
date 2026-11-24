@@ -5,7 +5,7 @@ from openpyxl import Workbook
 
 from app import clock
 
-from .helpers import issue
+from .helpers import blanks, issue
 
 
 def test_reports_smoke(org, ref):
@@ -33,7 +33,9 @@ def test_reports_smoke(org, ref):
 
 def test_split_reversal_voids_children(org, ref):
     line = issue(org, ref, qty=10)
-    out = org.ok(org.post("a1", f"/api/lines/{line['id']}/split", {"pieces": [3, 2], "photos": [org.photo("a1")]}))
+    b = blanks(3)
+    out = org.ok(org.post("a1", f"/api/lines/{line['id']}/split", {"pieces": [{"qty": 3, "code": b[0]}, {"qty": 2, "code": b[1]}],
+                                                                   "remainder_code": b[2], "photos": [org.photo("a1")]}))
     ev = [e for e in out["events"] if e["etype"] == "SPLIT_OUT"][0]
     rev = org.ok(org.post("keeper", "/api/reversals", {"event_id": ev["id"], "reason": "拆错"}))
     assert org.post("keeper", f"/api/reversals/{rev['id']}/decide", {"approve": True}).status_code == 403

@@ -2,7 +2,7 @@
   <div>
     <router-link to="/m/scan" class="scanbtn">
       <el-icon :size="28"><Camera /></el-icon>
-      <div><b>扫码登记</b><div class="s">扫物料码 → 选动作 → 拍照 → 提交</div></div>
+      <div><b>扫码登记</b><div class="s">扫仓储码 → 选动作 → 拍照 → 提交</div></div>
     </router-link>
     <div v-if="d" class="mk">
       <div class="c" @click="$router.push('/m/mine')"><b style="color: var(--brand)">{{ d.counts.active }}</b><span>在制结存行</span></div>

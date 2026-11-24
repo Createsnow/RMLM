@@ -246,6 +246,9 @@ def line_by_code(code: str, user: User = Depends(current_user), db: Session = De
     line = db.scalar(select(LedgerLine).where(LedgerLine.code == code))
     if line is None:
         mc = db.scalar(select(MaterialCode).where(MaterialCode.code == code))
+        if mc is not None and mc.retired:
+            cur = db.get(LedgerLine, mc.line_id)
+            raise BizError(f"{code} 是旧的 RM 码，已改用仓储码 {cur.code}，请扫仓储码")
         if mc is not None and mc.replaced:
             raise BizError(f"物料码 {code} 已拆分替换（B4），不能再扫；请扫新码")
         raise BizError(f"未找到物料码 {code}")
@@ -280,10 +283,25 @@ class ConsumeIn(PhotoIn):
     location_id: int | None = None  # D03 产线工位
 
 
+class SignIn(PhotoIn):
+    code: str | None = None  # 扫到的仓储码
+    no_code_reason: str | None = None  # 不扫码时的原因：标签破损 / 未赋码 / 批量交接
+
+
+class PieceIn(BaseModel):
+    qty: float
+    code: str  # 仓储预发的新标签
+
+
 class SplitIn(PhotoIn):
-    pieces: list[float]
+    pieces: list[PieceIn]
     loss_qty: float = 0
     loss_reason: str | None = None
+    remainder_code: str | None = None  # 余量换贴的新标签
+
+
+class CodeIn(BaseModel):
+    code: str
 
 
 class LocIn(PhotoIn):
@@ -327,9 +345,16 @@ def _done(db: Session, user: User, line: LedgerLine, extra: dict | None = None) 
 
 
 @router.post("/lines/{lid}/sign")
-def sign(lid: int, body: PhotoIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
+def sign(lid: int, body: SignIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
     line = _line(db, user, lid)
-    lineops.sign(db, line, user, check_photos(db, body.photos))
+    lineops.sign(db, line, user, check_photos(db, body.photos), body.code, body.no_code_reason)
+    return _done(db, user, line)
+
+
+@router.post("/lines/{lid}/bind-code")
+def bind_code(lid: int, body: CodeIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    line = _line(db, user, lid)
+    lineops.bind_code(db, line, user, body.code)
     return _done(db, user, line)
 
 
@@ -344,8 +369,8 @@ def consume(lid: int, body: ConsumeIn, user: User = Depends(current_user), db: S
 @router.post("/lines/{lid}/split")
 def split(lid: int, body: SplitIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
     line = _line(db, user, lid)
-    res = lineops.split(db, line, user, body.pieces, body.loss_qty, body.loss_reason, body.note,
-                        check_photos(db, body.photos))
+    res = lineops.split(db, line, user, [p.model_dump() for p in body.pieces], body.loss_qty, body.loss_reason,
+                        body.note, check_photos(db, body.photos), body.remainder_code)
     return _done(db, user, line, res)
 
 
@@ -756,3 +781,46 @@ def parallel_mark(pid: int, body: ParallelIn, user: User = Depends(current_user)
 
     pc = parallel.mark(db, user, get_or_404(db, ParallelCheck, pid, "抽查记录"), body.result, body.note)
     return parallel.rows_out(db, [pc])[0]
+
+
+# ================================================================== 仓储码（物料码来源，只读镜像）
+@router.get("/wms/codes")
+def wms_codes(q: str = "", state: str = "", user: User = Depends(current_user), db: Session = Depends(get_db)):
+    from ..models import WmsCode
+    from ..services import wms
+
+    require_role(user, "KEEPER", "WAREHOUSE", "ADMIN")
+    stmt = select(WmsCode)
+    if q:
+        stmt = stmt.where(WmsCode.code.like(f"%{q}%") | WmsCode.material_code.like(f"%{q}%"))
+    if state == "free":
+        stmt = stmt.where(WmsCode.line_id.is_(None), WmsCode.void.is_(False))
+    elif state == "blank":
+        stmt = stmt.where(WmsCode.line_id.is_(None), WmsCode.void.is_(False), WmsCode.material_code.is_(None))
+    elif state == "bound":
+        stmt = stmt.where(WmsCode.line_id.is_not(None))
+    elif state == "void":
+        stmt = stmt.where(WmsCode.void.is_(True))
+    rows = [wms.out(db, w) for w in db.scalars(stmt.order_by(WmsCode.id.desc()).limit(500))]
+    return {"rows": rows, "status": wms.status(db)}
+
+
+@router.post("/wms/codes/import")
+def wms_import(file: UploadFile = File(...), user: User = Depends(current_user), db: Session = Depends(get_db)):
+    from ..services import wms
+
+    return wms.import_xlsx(db, user, file.file)
+
+
+@router.post("/wms/sync")
+def wms_sync(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    from ..config import settings
+    from ..services import wms
+
+    require_role(user, "KEEPER", "WAREHOUSE", "ADMIN")
+    if not settings.wms_enabled:
+        raise BizError("未配置仓储接口（WMS_API_URL），请先用 Excel 导入赋码清单")
+    try:
+        return wms.sync(db)
+    except Exception as e:  # noqa: BLE001
+        raise BizError(f"仓储接口调用失败：{str(e)[:200]}")

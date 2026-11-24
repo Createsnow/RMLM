@@ -72,6 +72,11 @@ class Settings:
         self.k3_page_retries: int = _int("K3_PAGE_RETRIES", 3)
         self.k3_page_retry_seconds: int = _int("K3_PAGE_RETRY_SECONDS", 10)
 
+        # ---------- 仓储系统（物料码来源，只读）。接口字段待仓储确认；未配置时用 Excel 导入赋码清单。
+        self.wms_api_url: str = _env("WMS_API_URL").strip()
+        self.wms_api_token: str = _env("WMS_API_TOKEN").strip()
+        self.wms_timeout: int = _int("WMS_TIMEOUT", 60)
+
         # ---------- 企业微信自建应用。密钥只放 .env。
         self.wecom_corp_id: str = _env("WECOM_CORP_ID").strip()
         self.wecom_agent_id: str = _env("WECOM_AGENT_ID").strip()
@@ -84,6 +89,10 @@ class Settings:
     def k3_enabled(self) -> bool:
         """金蝶连接五项都填上才启用（未填全时物料用 Excel 导入）。"""
         return all((self.k3_server_url, self.k3_acct_id, self.k3_username, self.k3_app_id, self.k3_app_secret))
+
+    @property
+    def wms_enabled(self) -> bool:
+        return bool(self.wms_api_url)
 
     @property
     def wecom_enabled(self) -> bool:

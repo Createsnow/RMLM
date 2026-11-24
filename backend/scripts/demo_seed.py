@@ -13,7 +13,7 @@ from app.db import SessionLocal
 from app.main import init_db
 from app.models import Location, Material, Project, User
 from app.security import hash_password
-from app.services import erp, lineops, requisition
+from app.services import erp, lineops, requisition, wms
 from app.services.photos import save_photo
 
 PW = "Demo@1234"
@@ -76,9 +76,12 @@ def main() -> None:
         requisition.decide(db, approver, req, True, None)
         doc = erp.save_doc(db, keeper, {"no": f"QTCK-DEMO-{req.id:04d}", "doc_type": "LL", "posted": True,
                                         "remark": req.no, "lines": [{"material_code": mcode, "qty": qty}]})
+        # 仓库出库时实物已贴仓储码（演示用：赋码清单里先放好这张码）
+        wcode = f"WM{req.id:06d}"
+        wms.upsert(db, [{"code": wcode, "material_code": mcode, "qty": qty}], "IMPORT")
         line = erp.bind(db, keeper, req.items[0].id, doc.lines[0].id)
         if sign:
-            lineops.sign(db, line, user, photo(user))
+            lineops.sign(db, line, user, photo(user), code=wcode)
         return req, line
 
     def photo(u):
@@ -95,6 +98,8 @@ def main() -> None:
     flow(eng1, lead, "RD202519", "1000454", 10, approve=False, remark="待审核的演示申请")
     flow(tester, lab, "试制-1300", "1231346", 4, long_cycle=True, long_cycle_months=6, days=150, reason="R03",
          remark="长周期可靠性老化测试")
+    # 仓储预发给研发的空白码（拆分换码用）
+    wms.upsert(db, [{"code": f"WMB{i:05d}"} for i in range(1, 21)], "IMPORT")
     db.commit()
     print("演示数据已写入。演示账号（密码 Demo@1234）：")
     for u in db.scalars(select(User).where(User.username.like("demo_%"))):

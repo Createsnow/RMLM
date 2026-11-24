@@ -110,6 +110,11 @@ def line_out(db: Session, line: LedgerLine, viewer: User, c=None, full: bool = F
         flags.append("锁定")
     if any(e.etype == "TRANSFER_REQ" and e.status == "PENDING" and not e.to_user_id for e in c.events):
         flags.append("外部·待认领")
+    from ..services.wms import bound_codes
+
+    wms_bound = bool(bound_codes(db, [line.code]))
+    if line.signed and not line.voided and not wms_bound:
+        flags.append("待绑仓储码")
     d = {
         "id": line.id, "code": line.code, "level": line.level, "parent_id": line.parent_id, "root_id": line.root_id,
         "material_id": m.id, "material_code": m.code, "material": m.name, "spec": m.spec, "unit": m.unit,
@@ -122,7 +127,8 @@ def line_out(db: Session, line: LedgerLine, viewer: User, c=None, full: bool = F
         "consumed": s(c.consumed), "loss": s(c.loss), "split_out": s(c.split_out), "returned": s(c.returned),
         "scrapped": s(c.scrapped), "balance": s(c.balance), "balance_amount": str((max(c.balance, D(0)) * price).quantize(Decimal("0.01"))),
         "return_pending": s(c.return_pending), "scrap_pending": s(c.scrap_pending), "created_at": s(line.created_at),
-        "voided": line.voided,
+        "voided": line.voided, "wms_bound": wms_bound,
+        "code_kind": "WMS" if wms_bound else ("LINE" if line.code.startswith("LN") else "RM"),
     }
     if line.erp_line_id or line.root_id:
         root = db.get(LedgerLine, line.root_id or line.id)
@@ -153,7 +159,8 @@ def line_out(db: Session, line: LedgerLine, viewer: User, c=None, full: bool = F
     } for e in c.events]
     codes = list(db.scalars(select(MaterialCode).where(MaterialCode.line_id == line.id).order_by(MaterialCode.id)))
     d["codes"] = [{"code": k.code, "layer": k.layer, "parent_code": k.parent_code, "qty_init": s(k.qty_init),
-                   "state": ledger.code_state(k, line, c), "replaced_at": s(k.replaced_at)} for k in codes]
+                   "state": ledger.code_state(k, line, c), "replaced_at": s(k.replaced_at),
+                   "source": k.source} for k in codes]
     d["children"] = [{"id": k.id, "code": k.code, "qty": s(k.qty), "voided": k.voided}
                      for k in db.scalars(select(LedgerLine).where(LedgerLine.parent_id == line.id))]
     can = _can_operate(db, viewer, line) and not line.locked and not line.voided
@@ -178,6 +185,8 @@ def line_out(db: Session, line: LedgerLine, viewer: User, c=None, full: bool = F
         "cancel_transfer": bool(pending_transfer and viewer.id in (pending_transfer.operator_id, line.holder_id)),
         "assign_transfer": bool(pending_transfer and not pending_transfer.to_user_id and has_role(viewer, "KEEPER")),
         "conclusion": can or viewer.id == line.holder_id,
+        "bind_code": line.signed and not wms_bound and not line.voided and not line.locked and c.balance > 0
+                     and (can or has_role(viewer, "KEEPER")),
         "qconfirm": can and active and line.long_cycle,
         "renew": can and active and line.long_cycle,
         "due_change": can and active,

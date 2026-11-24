@@ -8,7 +8,7 @@ from .. import clock
 from ..errors import BizError, forbid
 from ..models import LedgerLine, Material, MaterialCode, Project, ReqItem, Requisition, User
 from ..perms import active_delegates, default_approver, has_role, proxy_check, require_role
-from .common import D, add_months, add_todo, close_todos, dict_codes, new_code, new_no, notify
+from .common import D, add_months, add_todo, close_todos, dict_codes, new_line_no, new_no, notify
 
 
 def create(db: Session, op: User, data: dict) -> Requisition:
@@ -153,7 +153,7 @@ def _new_line(db: Session, op: User | None, req: Requisition, item: ReqItem, qty
     m = db.get(Material, item.material_id)
     price = (erp_line.unit_price if erp_line is not None and erp_line.unit_price is not None else m.unit_price)
     line = LedgerLine(
-        code=new_code(db), level=1, requisition_id=req.id, req_item_id=item.id,
+        code=new_line_no(db), level=1, requisition_id=req.id, req_item_id=item.id,
         erp_line_id=erp_line.id if erp_line is not None else None, project_id=req.project_id,
         material_id=item.material_id, qty=D(qty), unit_price=price, user_id=req.user_id, holder_id=req.user_id,
         due_date=req.expected_return, long_cycle=req.long_cycle,
@@ -162,8 +162,7 @@ def _new_line(db: Session, op: User | None, req: Requisition, item: ReqItem, qty
     )
     db.add(line)
     db.flush()
-    line.root_id = line.id
-    db.add(MaterialCode(code=line.code, line_id=line.id, layer=1, qty_init=D(qty)))
+    line.root_id = line.id  # 物料码在签收时扫仓储码绑定，这里只有行号
     db.flush()
     return line
 

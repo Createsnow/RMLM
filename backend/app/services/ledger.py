@@ -105,6 +105,8 @@ def status_of(line: LedgerLine, c: Calc, today: date | None = None) -> str:
 
 
 def code_state(code: MaterialCode, line: LedgerLine, c: Calc) -> str:
+    if code.retired:
+        return "RETIRED"  # 旧 RM 码已补绑仓储码
     if code.replaced:
         return "B4"
     if c.balance <= 0:

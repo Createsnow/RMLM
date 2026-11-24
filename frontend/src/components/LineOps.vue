@@ -6,6 +6,27 @@
       <el-tag v-if="isProxy" type="warning" size="small" style="margin-left: 6px">代登，将通知持有人</el-tag>
     </div>
     <el-form label-position="top" @submit.prevent>
+      <template v-if="kind === 'sign'">
+        <el-form-item v-if="!f.no_code" label="仓储码（扫实物上的仓储标签）" required>
+          <el-input v-model="f.code" placeholder="扫码枪扫入或输入仓储码" clearable><template #prefix><el-icon><Postcard /></el-icon></template></el-input>
+          <div class="muted">码要在仓储赋码清单里，物料和数量与本行一致；一个码只挂一行。</div>
+        </el-form-item>
+        <el-checkbox v-model="f.no_code">无法扫码（标签破损、未赋码或批量交接）</el-checkbox>
+        <el-form-item v-if="f.no_code" label="不扫码的原因" required style="margin-top: 8px">
+          <el-radio-group v-model="f.no_code_reason">
+            <el-radio-button v-for="r in NO_CODE" :key="r" :value="r">{{ r }}</el-radio-button>
+          </el-radio-group>
+          <div class="muted">签收后本行记“待绑仓储码”，请尽快补扫；计入码绑定率。</div>
+        </el-form-item>
+      </template>
+
+      <template v-if="kind === 'bind_code'">
+        <el-form-item label="仓储码" required>
+          <el-input v-model="f.code" placeholder="扫码枪扫入或输入仓储码" clearable><template #prefix><el-icon><Postcard /></el-icon></template></el-input>
+          <div class="muted">绑定后{{ line.code_kind === 'RM' ? '旧 RM 码作废，' : '' }}本行物料码改为仓储码。码的物料和数量（原领用数量 {{ line.qty }} {{ line.unit }}）要与本行一致。</div>
+        </el-form-item>
+      </template>
+
       <template v-if="kind === 'consume'">
         <el-form-item label="本次登记">
           <el-radio-group v-model="f.is_loss">
@@ -36,12 +57,13 @@
       </template>
 
       <template v-if="kind === 'split'">
-        <el-form-item label="拆出份数（每份生成新码，需打印标签）" required>
+        <el-form-item label="拆出的每份：数量 + 扫一张仓储预发的新标签" required>
           <div v-for="(p, i) in f.pieces" :key="i" class="piece">
-            <el-input-number v-model="f.pieces[i]" :min="0" :precision="3" style="flex: 1" />
+            <el-input-number v-model="p.qty" :min="0" :precision="3" style="width: 130px" />
+            <el-input v-model="p.code" placeholder="扫新标签" clearable style="flex: 1" />
             <el-button v-if="f.pieces.length > 1" :icon="'Close'" circle @click="f.pieces.splice(i, 1)" />
           </div>
-          <el-button size="small" @click="f.pieces.push(0)"><el-icon><Plus /></el-icon>再拆一份</el-button>
+          <el-button size="small" @click="f.pieces.push({ qty: 0, code: '' })"><el-icon><Plus /></el-icon>再拆一份</el-button>
         </el-form-item>
         <el-form-item label="损耗（可为 0）">
           <el-input-number v-model="f.loss_qty" :min="0" :precision="3" style="width: 100%" />
@@ -53,7 +75,10 @@
         </el-form-item>
         <el-alert :type="remainder < 0 ? 'error' : 'info'" :closable="false" show-icon
                   :title="`守恒：拆出 ${sumPieces} + 损耗 ${f.loss_qty || 0} + 余量 ${remainder} = 结存 ${line.balance}`" />
-        <div class="muted" style="margin-top: 6px">原码提交后立即失效，余量也会换新码；物料码最多三层。</div>
+        <el-form-item v-if="remainder > 0" label="余量换贴的新标签" required style="margin-top: 10px">
+          <el-input v-model="f.remainder_code" placeholder="扫一张新标签贴在余量上" clearable />
+        </el-form-item>
+        <div class="muted" style="margin-top: 6px">原码提交后立即失效；新标签用仓储预发的空白码（或同物料的仓储码）。物料码最多三层。</div>
       </template>
 
       <template v-if="kind === 'hold' || kind === 'move'">
@@ -156,18 +181,19 @@ const locations = ref([])
 const boxes = ref([])
 const stations = ref([])
 const f = reactive({})
-const titles = { sign: '签收', consume: '使用登记', split: '拆分换码', hold: 'WIP 暂存', move: '更新位置', transfer: '转交他人',
+const NO_CODE = ['标签破损', '未赋码', '批量交接']
+const titles = { sign: '签收', bind_code: '补绑仓储码', consume: '使用登记', split: '拆分换码', hold: 'WIP 暂存', move: '更新位置', transfer: '转交他人',
   return: '退库', scrap: '报废', qconfirm: '季度在用确认', renew: '长周期续期', due_change: '申请改归还日' }
 const needPhoto = computed(() => ['sign', 'consume', 'split', 'hold', 'scrap'].includes(kind.value))
-const isProxy = computed(() => store.user && props.line.holder_id !== store.user.id && kind.value !== 'sign')
-const sumPieces = computed(() => +(f.pieces || []).reduce((a, b) => a + (+b || 0), 0).toFixed(3))
+const isProxy = computed(() => store.user && props.line.holder_id !== store.user.id && !['sign', 'bind_code'].includes(kind.value))
+const sumPieces = computed(() => +(f.pieces || []).reduce((a, b) => a + (+b.qty || 0), 0).toFixed(3))
 const remainder = computed(() => +(+props.line.balance - sumPieces.value - (+f.loss_qty || 0)).toFixed(3))
 
 async function open(k) {
   kind.value = k
   Object.keys(f).forEach(key => delete f[key])
   Object.assign(f, { qty: +props.line.balance, dest: 'D01', is_loss: false, loss_reason: null, note: '', photos: [],
-    pieces: [0], loss_qty: 0, location_id: null, to_user_id: null, reason: '', mode: 'RESIDUE', box: null, months: 6, new_date: null,
+    pieces: [{ qty: 0, code: '' }], remainder_code: '', code: '', no_code: false, no_code_reason: null, loss_qty: 0, location_id: null, to_user_id: null, reason: '', mode: 'RESIDUE', box: null, months: 6, new_date: null,
     ship_no: '', station_id: null, external: false, external_name: '' })
   if (k === 'consume') f.qty = 0
   visible.value = true
@@ -179,10 +205,12 @@ async function open(k) {
 async function submit() {
   const id = props.line.id
   const body = {
-    sign: () => ['sign', { photos: f.photos, note: f.note }],
+    sign: () => ['sign', { photos: f.photos, note: f.note, code: f.no_code ? null : f.code, no_code_reason: f.no_code ? f.no_code_reason : null }],
+    bind_code: () => ['bind-code', { code: f.code }],
     consume: () => ['consume', { qty: f.qty, dest: f.is_loss ? null : f.dest, is_loss: f.is_loss, loss_reason: f.loss_reason, note: f.note, photos: f.photos,
       ship_no: f.dest === 'D01' ? f.ship_no : null, location_id: f.dest === 'D03' ? f.station_id : null }],
-    split: () => ['split', { pieces: f.pieces.filter(p => +p > 0), loss_qty: f.loss_qty, loss_reason: f.loss_reason, note: f.note, photos: f.photos }],
+    split: () => ['split', { pieces: f.pieces.filter(p => +p.qty > 0), loss_qty: f.loss_qty, loss_reason: f.loss_reason, note: f.note, photos: f.photos,
+      remainder_code: remainder.value > 0 ? f.remainder_code : null }],
     hold: () => ['hold', { location_id: f.location_id, note: f.note, photos: f.photos }],
     move: () => ['move', { location_id: f.location_id, note: f.note, photos: f.photos }],
     transfer: () => ['transfer', f.external ? { external_name: f.external_name, reason: f.reason } : { to_user_id: f.to_user_id, reason: f.reason }],
@@ -195,7 +223,7 @@ async function submit() {
   saving.value = true
   try {
     const res = await api.post(`/api/lines/${id}/${body[0]}`, body[1])
-    ElMessage.success(kind.value === 'transfer' ? (f.external ? '已登记外部转交，等待领料专员认领指派' : '已发起转交，等待对方确认') : (kind.value === 'renew' || kind.value === 'due_change') ? '已提交，等待直属上级审核' : '已登记')
+    ElMessage.success(kind.value === 'bind_code' ? '已绑定仓储码' : kind.value === 'transfer' ? (f.external ? '已登记外部转交，等待领料专员认领指派' : '已发起转交，等待对方确认') : (kind.value === 'renew' || kind.value === 'due_change') ? '已提交，等待直属上级审核' : '已登记')
     visible.value = false
     emit('done', res, kind.value)
   } finally { saving.value = false }
@@ -206,5 +234,5 @@ defineExpose({ open })
 
 <style scoped>
 .head { background: #f7f9fc; border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; font-size: 13px; }
-.piece { display: flex; gap: 6px; width: 100%; margin-bottom: 6px; }
+.piece { display: flex; gap: 6px; width: 100%; margin-bottom: 6px; align-items: center; }
 </style>

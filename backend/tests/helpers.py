@@ -3,6 +3,24 @@ from datetime import date, timedelta
 from app import clock
 
 _doc_seq = [0]
+_wms_seq = [0]
+
+
+def wms_code(material: str | None = "M-CABLE", qty=None) -> str:
+    """往仓储赋码清单里放一张码（material=None 为仓储预发的空白码），返回码。"""
+    from app import db as dbmod
+    from app.services import wms
+
+    _wms_seq[0] += 1
+    code = f"WM{_wms_seq[0]:06d}"
+    with dbmod.SessionLocal() as db:
+        wms.upsert(db, [{"code": code, "material_code": material, "qty": qty}], "IMPORT")
+        db.commit()
+    return code
+
+
+def blanks(n: int) -> list[str]:
+    return [wms_code(None) for _ in range(n)]
 
 
 def make_req(api, ref, who="a1", material="M-CABLE", qty=10, **kw):
@@ -32,7 +50,8 @@ def issue(api, ref, who="a1", approver="lead_a", material="M-CABLE", qty=10, sig
     line = api.ok(api.post("keeper", "/api/erp/bind",
                            {"req_item_id": req["items"][0]["id"], "erp_line_id": doc["lines"][0]["id"]}))
     if sign:
-        line = api.ok(api.post(who, f"/api/lines/{line['id']}/sign", {"photos": [api.photo(who)]}))
+        code = wms_code(material, qty)
+        line = api.ok(api.post(who, f"/api/lines/{line['id']}/sign", {"photos": [api.photo(who)], "code": code}))
     line["_req"] = req
     line["_doc"] = doc
     return line

@@ -20,7 +20,7 @@
 import { onMounted, onUnmounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 
-const props = defineProps({ placeholder: { type: String, default: '扫描或输入物料码 / 单据号' } })
+const props = defineProps({ placeholder: { type: String, default: '扫描或输入仓储码 / 单据号' } })
 const emit = defineEmits(['scan'])
 const code = ref('')
 const inp = ref()

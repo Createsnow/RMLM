@@ -88,7 +88,7 @@ const metricRows = computed(() => {
   const row = (name, gate, target, v, ok, how) => ({ name, gate, target, v, ok: v == null || ok, how })
   return [
     row('项目关联率', true, '100%', g.project_link_rate, g.project_link_rate === 100, '领用行项目命中 ERP 项目档案的占比'),
-    row('码绑定率', true, '≥ 95%', g.code_bind_rate, g.code_bind_rate >= 95, '已绑定码的行 / 已签收行（条码上线前以行码计）'),
+    row('码绑定率', true, '≥ 95%', g.code_bind_rate, g.code_bind_rate >= 95, `已绑仓储码的行 / 已签收行（待补绑 ${d.value.counts.to_bind} 行）`),
     row('代登率（签收除外）', true, '< 10%', g.proxy_rate, g.proxy_rate < 10, '经手人 ≠ 持有人的事件占比'),
     row('对账差异关闭率', false, '月末 100%', o.recon_close_rate, o.recon_close_rate === 100, '差异池中已平的占比'),
     row('报废单据覆盖率', false, '≥ 95%', o.scrap_doc_rate, o.scrap_doc_rate >= 95, '已挂 ERP 报废单的整件报废 / 已判废'),
