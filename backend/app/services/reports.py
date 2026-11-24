@@ -8,11 +8,11 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from .. import clock
-from ..models import (DocAlloc, Event, LedgerLine, Material, OverdueSnapshot, Project, ReconDiff, Requisition,
-                      Todo, User)
+from ..models import (DictItem, DocAlloc, ErpDoc, ErpLine, Event, LedgerLine, Location, Material, OverdueSnapshot,
+                      Project, ReconDiff, Requisition, Todo, User)
 from ..perms import visible_user_ids
 from . import ledger
-from .common import D, quarter_of
+from .common import D, qs, quarter_of
 
 
 def _pct(a, b) -> float | None:
@@ -60,16 +60,80 @@ def dashboard(db: Session, user: User) -> dict:
     gate["passed"] = (gate["project_link_rate"] in (None, 100.0)
                       and (gate["code_bind_rate"] is None or gate["code_bind_rate"] >= 95)
                       and (gate["proxy_rate"] is None or gate["proxy_rate"] < 10))
+    users = {u.id: u for u in db.scalars(select(User))}
+    mats = {m.id: m for m in db.scalars(select(Material))}
+    # 原型「总览看板」：在制结存按项目、需要今天处理、最近流向事件
+    by_project: dict[int, dict] = {}
+    need_today, scrap_wait = [], 0
+    for l in lines:
+        c = calcs[l.id]
+        st = ledger.status_of(l, c, today)
+        if st == "S6" and c.scrap_pending > 0:
+            scrap_wait += 1
+        if c.balance > 0 and l.signed:
+            p = projects[l.project_id]
+            b = by_project.setdefault(l.project_id, {"project": p.code, "name": p.name, "lines": 0,
+                                                     "balance_amount": Decimal(0)})
+            b["lines"] += 1
+            b["balance_amount"] += c.balance * D(l.unit_price or 0)
+        if st == "S5" or (st == "S6" and c.scrap_pending > 0):
+            need_today.append(line_brief(db, l, c, users, mats, projects))
+    for b in by_project.values():
+        b["balance_amount"] = str(b["balance_amount"].quantize(Decimal("0.01")))
+    start_of_day = datetime.combine(today, datetime.min.time())
+    today_events = db.scalar(select(func.count()).select_from(Event).where(
+        Event.line_id.in_(line_ids or [0]), Event.created_at >= start_of_day,
+        Event.etype.notin_(("SPLIT_IN", "REVERSAL"))))
+    recon_open = db.scalar(select(func.count()).select_from(ReconDiff).where(ReconDiff.state != "RESOLVED",
+                                                                             ReconDiff.diff != 0))
     return {
         "today": today.isoformat(),
         "counts": {"lines": len(lines), "active": active, "overdue": overdue, "urgent_pending": urgent,
                    "doc_pending": status_cnt.get("S6", 0), "to_sign": status_cnt.get("S0", 0),
-                   "balance_amount": str(amount.quantize(Decimal("0.01")))},
+                   "scrap_pending": scrap_wait, "recon_open": recon_open, "today_events": today_events,
+                   "projects": len(by_project), "balance_amount": str(amount.quantize(Decimal("0.01")))},
         "status": dict(status_cnt),
         "gate": gate,
         "observe": observe(db, lines, calcs),
+        "by_project": sorted(by_project.values(), key=lambda x: (-x["lines"], x["project"])),
+        "need_today": need_today[:20],
+        "recent_events": recent_events(db, lines, users, mats),
         "todos": db.scalar(select(func.count()).select_from(Todo).where(Todo.user_id == user.id, Todo.state == "OPEN")),
     }
+
+
+def recent_events(db: Session, lines: list[LedgerLine], users: dict, mats: dict, limit: int = 10) -> list[dict]:
+    """最近流向事件（只增不改，每条都有经手人与时间）。"""
+    from .lineops import etype_name
+
+    by_id = {l.id: l for l in lines}
+    evs = list(db.scalars(select(Event).where(Event.line_id.in_(list(by_id) or [0]), Event.status == "EFFECTIVE",
+                                              Event.etype.notin_(("SPLIT_IN", "REVERSAL")))
+                          .order_by(Event.id.desc()).limit(limit)))
+    allocs: dict[int, list[str]] = {}
+    for eid, no in db.execute(select(DocAlloc.event_id, ErpDoc.no).join(ErpLine, ErpLine.id == DocAlloc.erp_line_id)
+                              .join(ErpDoc, ErpDoc.id == ErpLine.doc_id)
+                              .where(DocAlloc.event_id.in_([e.id for e in evs] or [0]))):
+        allocs.setdefault(eid, [])
+        if no not in allocs[eid]:
+            allocs[eid].append(no)
+    locs = {x.id: x.name for x in db.scalars(select(Location))}
+    out = []
+    for e in evs:
+        l = by_id[e.line_id]
+        m = mats[l.material_id]
+        where = (locs.get(e.location_id) if e.location_id else None) or (users[e.to_user_id].name if e.to_user_id else None)
+        erp = None
+        if e.etype == "SIGN" and l.erp_line_id:
+            erp = db.get(ErpLine, l.erp_line_id).doc.no
+        elif e.etype in ("RETURN", "SCRAP"):
+            erp = "、".join(allocs.get(e.id, [])) or None
+        out.append({"id": e.id, "line_id": l.id, "code": e.code, "etype": e.etype, "etype_name": etype_name(e.etype),
+                    "qty": qs(e.qty), "unit": m.unit, "material": m.name, "dest": e.dest, "where": where,
+                    "operator": users[e.operator_id].name, "is_proxy": e.is_proxy, "erp_doc_no": erp,
+                    "needs_doc": e.etype in ("RETURN", "SCRAP") and e.scrap_mode != "RESIDUE" and not erp,
+                    "created_at": e.created_at.isoformat(sep=" ")})
+    return out
 
 
 def observe(db: Session, lines: list[LedgerLine], calcs) -> dict:
@@ -110,7 +174,7 @@ def weekly_hanging(db: Session, user: User) -> dict:
     mats = {m.id: m for m in db.scalars(select(Material))}
     projects = {p.id: p for p in db.scalars(select(Project))}
     now = clock.now()
-    out = {"overdue": [], "urgent": [], "hold_30d": [], "doc_pending": [], "level3": []}
+    out = {"overdue": [], "urgent": [], "hold_30d": [], "doc_pending": [], "lab_pending": [], "level3": []}
     for l in lines:
         c = calcs[l.id]
         st = ledger.status_of(l, c)
@@ -123,6 +187,15 @@ def weekly_hanging(db: Session, user: User) -> dict:
             out["hold_30d"].append(b)
         if st == "S6":
             out["doc_pending"].append(b)
+    from .lineops import LAB_CONCLUSION_DAYS, lab_pending
+
+    by_id = {l.id: l for l in lines}
+    for e in lab_pending(db, list(by_id)):
+        if e.created_at < now - timedelta(days=LAB_CONCLUSION_DAYS):
+            l = by_id[e.line_id]
+            b = line_brief(db, l, calcs[l.id], users, mats, projects)
+            b.update({"event_id": e.id, "sent_at": e.created_at.isoformat(sep=" "), "qty": qs(e.qty)})
+            out["lab_pending"].append(b)
     for t in db.scalars(select(Todo).where(Todo.state == "OPEN", Todo.escalated >= 2)):
         out["level3"].append({"id": t.id, "title": t.title, "owner": users[t.user_id].name,
                               "created_at": t.created_at.isoformat(sep=" ")})
@@ -218,4 +291,25 @@ def quarterly_lists(db: Session, user: User) -> dict:
                 usage[code] += 1
     for r in db.scalars(select(Requisition).where(Requisition.created_at >= qs)):
         usage[r.reason_code] += 1
-    return {"quarter": q, "stocktake_sample": sample, "dict_usage": dict(usage)}
+    for d in db.scalars(select(ReconDiff).where(ReconDiff.resolved_at >= qs, ReconDiff.reason_code.is_not(None))):
+        usage[d.reason_code] += 1
+    return {"quarter": q, "stocktake_sample": sample, "dict_usage": dict(usage),
+            "dict_review": dict_review(db, usage)}
+
+
+REVIEW_DICTS = ("DEST", "REASON", "LOSS_REASON", "SCRAP_REASON", "RECON_REASON")
+
+
+def dict_review(db: Session, usage: dict[str, int]) -> list[dict]:
+    """蓝图 5.3：每季度复盘字典使用情况，整季零使用或使用率低于 1% 的枚举建议合并或停用。"""
+    out = []
+    for t in REVIEW_DICTS:
+        items = list(db.scalars(select(DictItem).where(DictItem.dict_type == t, DictItem.active.is_(True))
+                                .order_by(DictItem.sort)))
+        total = sum(usage.get(i.code, 0) for i in items)
+        for i in items:
+            n = usage.get(i.code, 0)
+            pct = round(n / total * 100, 1) if total else None
+            out.append({"dict_type": t, "code": i.code, "name": i.name, "count": n, "pct": pct,
+                        "suggest": bool(total) and (n == 0 or (pct is not None and pct < 1))})
+    return out

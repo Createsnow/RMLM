@@ -44,8 +44,12 @@ def etype_name(t: str) -> str:
         "SIGN": "签收", "CONSUME": "耗用", "SPLIT_OUT": "拆出", "SPLIT_IN": "拆入", "HOLD": "暂存",
         "MOVE": "更新位置", "TRANSFER_REQ": "发起转交", "TRANSFER_OK": "转交确认", "TRANSFER_REJ": "转交拒绝",
         "RETURN": "退库", "SCRAP": "报废", "REVERSAL": "冲销", "QCONFIRM": "季度在用确认",
-        "RENEW": "续期申请", "DUE_CHANGE": "改归还日申请",
+        "RENEW": "续期申请", "DUE_CHANGE": "改归还日申请", "CONCLUSION": "回填实验结论",
     }.get(t, t)
+
+
+# D02 送实验室后多少天内必须回填结论（超期派预警待办）
+LAB_CONCLUSION_DAYS = 30
 
 
 def _operator(db: Session, line: LedgerLine, op: User) -> bool:
@@ -82,11 +86,13 @@ def sign(db: Session, line: LedgerLine, op: User, photos: list[int]) -> Event:
 
 # ------------------------------------------------------------------ 使用 / 损耗
 def consume(db: Session, line: LedgerLine, op: User, qty, dest: str | None, is_loss: bool,
-            loss_reason: str | None, note: str | None, photos: list[int]) -> Event:
+            loss_reason: str | None, note: str | None, photos: list[int], ship_no: str | None = None,
+            location_id: int | None = None) -> Event:
     _guard(line)
     proxy = _operator(db, line, op)
     c = ledger.load_one(db, line)
     q = _check_qty(qty, c.balance)
+    extra, loc_id = None, None
     if is_loss:
         if loss_reason not in dict_codes(db, "LOSS_REASON"):
             raise BizError("请选择损耗原因")
@@ -94,9 +100,55 @@ def consume(db: Session, line: LedgerLine, op: User, qty, dest: str | None, is_l
             raise BizError("损耗原因为「其他」时必须写说明")
     elif dest not in USE_DESTS:
         raise BizError("使用登记的去向只能选 D01 项目成品 / D02 可靠性实验 / D03 产线试用")
+    elif dest == "D01":
+        # 蓝图 4.1：做成样品或成品交付出货，须关联项目与出货单
+        if not (ship_no or "").strip():
+            raise BizError("去向为 D01 项目成品时必须填写出货单号")
+        extra = {"ship_no": ship_no.strip()}
+    elif dest == "D03":
+        # 蓝图 4.1：在产线试跑，须填产线工位位置码
+        loc_id = _location(db, location_id, ("STATION",)).id if location_id else None
+        if not loc_id:
+            raise BizError("去向为 D03 产线试用时必须选择产线工位")
     _require_photos(photos, "耗用")
     return _event(db, line, "CONSUME", op, proxy, qty=q, dest=dest if not is_loss else (dest or None),
-                  is_loss=is_loss, loss_reason=loss_reason if is_loss else None, note=note, photos=photos)
+                  is_loss=is_loss, loss_reason=loss_reason if is_loss else None, note=note, photos=photos,
+                  location_id=loc_id, extra=extra)
+
+
+def lab_pending(db: Session, line_ids: list[int] | None = None) -> list[Event]:
+    """D02 可靠性实验耗用里还没回填结论的事件。"""
+    q = select(Event).where(Event.etype == "CONSUME", Event.dest == "D02", Event.is_loss.is_(False),
+                            Event.status == "EFFECTIVE")
+    if line_ids is not None:
+        q = q.where(Event.line_id.in_(line_ids or [0]))
+    events = list(db.scalars(q))
+    if not events:
+        return []
+    done = {(e.extra or {}).get("for") for e in db.scalars(
+        select(Event).where(Event.etype == "CONCLUSION", Event.line_id.in_({e.line_id for e in events})))}
+    reversed_ids = set(db.scalars(select(Event.reverses_id).where(Event.etype == "REVERSAL",
+                                                                  Event.status == "EFFECTIVE")))
+    return [e for e in events if e.id not in done and e.id not in reversed_ids]
+
+
+def conclusion(db: Session, target: Event, op: User, text: str, photos: list[int] | None) -> Event:
+    """D02 回填实验结论：追加一条结论事件，不改原耗用事件。"""
+    if target.etype != "CONSUME" or target.dest != "D02" or target.is_loss or target.status != "EFFECTIVE":
+        raise BizError("只有 D02 可靠性实验的耗用需要回填结论")
+    line = db.get(LedgerLine, target.line_id)
+    if line.voided:
+        raise BizError("该行已作废")
+    proxy = _operator(db, line, op)
+    if target not in lab_pending(db, [line.id]):
+        raise BizError("该实验已回填结论")
+    if not (text or "").strip():
+        raise BizError("请填写实验结论")
+    e = _event(db, line, "CONCLUSION", op, proxy, note=text.strip(), photos=photos or None,
+               extra={"for": target.id})
+    if not lab_pending(db, [line.id]):
+        close_todos(db, "line", line.id, ("LAB_CONCLUSION",))
+    return e
 
 
 # ------------------------------------------------------------------ 拆分换码
@@ -194,25 +246,80 @@ def move(db: Session, line: LedgerLine, op: User, location_id: int, note: str | 
 
 
 # ------------------------------------------------------------------ 转交
-def transfer_request(db: Session, line: LedgerLine, op: User, to_user_id: int, reason: str) -> Event:
+def _pending_transfer(db: Session, line: LedgerLine) -> Event | None:
+    return db.scalar(select(Event).where(Event.line_id == line.id, Event.etype == "TRANSFER_REQ",
+                                         Event.status == "PENDING"))
+
+
+def transfer_request(db: Session, line: LedgerLine, op: User, to_user_id: int | None, reason: str,
+                     external_name: str | None = None) -> Event:
     _guard(line)
     proxy = _operator(db, line, op)
     if not (reason or "").strip():
         raise BizError("请填写转交原因")
-    to = db.get(User, to_user_id)
+    external = (external_name or "").strip()
+    to = None
+    if not external:
+        to = db.get(User, to_user_id) if to_user_id else None
+        if not to or not to.active:
+            raise BizError("受让人不存在或已停用")
+        if to.id == line.holder_id:
+            raise BizError("受让人不能是当前持有人")
+    if ledger.load_one(db, line).balance <= 0:
+        raise BizError("结存为 0，无需转交")
+    if _pending_transfer(db, line):
+        raise BizError("已有待确认的转交，请等待受让人处理")
+    if external:
+        # 蓝图 3.3：受让人不在通讯录时标"外部 / 待认领"，不得直接改持有人；由领料专员指派账号后再确认
+        e = _event(db, line, "TRANSFER_REQ", op, proxy, reason=reason, dest="D07", status="PENDING",
+                   extra={"external": external})
+        for k in users_with_role(db, "KEEPER"):
+            add_todo(db, k.id, "TRANSFER_ASSIGN", f"外部受让待认领：{line.code} → {external}", "event", e.id,
+                     due_hours=48)
+        return e
+    e = _event(db, line, "TRANSFER_REQ", op, proxy, to_user_id=to.id, reason=reason, dest="D07", status="PENDING")
+    add_todo(db, to.id, "TRANSFER_CONFIRM", f"请确认接收转交：{line.code}", "event", e.id)
+    return e
+
+
+def transfer_assign(db: Session, req: Event, op: User, to_user_id: int) -> Event:
+    """领料专员把"外部 · 待认领"的转交指派给系统账号，之后走受让人确认。"""
+    if not has_role(op, "KEEPER"):
+        raise forbid("外部受让由领料专员认领指派")
+    if req.etype != "TRANSFER_REQ" or req.status != "PENDING" or not (req.extra or {}).get("external"):
+        raise BizError("只有待认领的外部转交可以指派")
+    line = db.get(LedgerLine, req.line_id)
+    _guard(line)
+    to = db.get(User, to_user_id) if to_user_id else None
     if not to or not to.active:
         raise BizError("受让人不存在或已停用")
     if to.id == line.holder_id:
         raise BizError("受让人不能是当前持有人")
-    if ledger.load_one(db, line).balance <= 0:
-        raise BizError("结存为 0，无需转交")
-    pending = db.scalar(select(Event.id).where(Event.line_id == line.id, Event.etype == "TRANSFER_REQ",
-                                               Event.status == "PENDING"))
-    if pending:
-        raise BizError("已有待确认的转交，请等待受让人处理")
-    e = _event(db, line, "TRANSFER_REQ", op, proxy, to_user_id=to.id, reason=reason, dest="D07", status="PENDING")
+    req.status, req.reviewed_by, req.reviewed_at = "ASSIGNED", op.id, clock.now()
+    close_todos(db, "event", req.id)
+    e = Event(line_id=line.id, code=line.code, etype="TRANSFER_REQ", operator_id=req.operator_id,
+              holder_id=line.holder_id, is_proxy=req.is_proxy, to_user_id=to.id, reason=req.reason, dest="D07",
+              status="PENDING", extra={"external": req.extra["external"], "assigned_from": req.id,
+                                       "assigned_by": op.id})
+    db.add(e)
+    db.flush()
     add_todo(db, to.id, "TRANSFER_CONFIRM", f"请确认接收转交：{line.code}", "event", e.id)
+    notify(db, line.holder_id, f"外部转交已指派给 {to.name}，待其确认：{line.code}", "line", line.id)
     return e
+
+
+def transfer_cancel(db: Session, req: Event, op: User) -> Event:
+    """发起人（或持有人）撤回待确认的转交。"""
+    if req.etype != "TRANSFER_REQ" or req.status != "PENDING":
+        raise BizError("该转交已处理")
+    line = db.get(LedgerLine, req.line_id)
+    if op.id not in (req.operator_id, line.holder_id):
+        raise forbid("只有发起人或持有人可以撤回转交")
+    req.status, req.reviewed_by, req.reviewed_at = "CANCELLED", op.id, clock.now()
+    close_todos(db, "event", req.id)
+    if req.to_user_id and req.to_user_id != op.id:
+        notify(db, req.to_user_id, f"{op.name} 已撤回转交：{line.code}", "line", line.id)
+    return req
 
 
 def transfer_decide(db: Session, req: Event, op: User, accept: bool) -> Event:

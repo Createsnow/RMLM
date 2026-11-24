@@ -24,6 +24,15 @@
             <el-option v-for="d in dictOptions('LOSS_REASON')" :key="d.code" :value="d.code" :label="`${d.code} ${d.name}`" />
           </el-select>
         </el-form-item>
+        <el-form-item v-if="!f.is_loss && f.dest === 'D01'" label="出货单号" required>
+          <el-input v-model="f.ship_no" placeholder="交付出货 / 展会对应的出货单号" />
+        </el-form-item>
+        <el-form-item v-if="!f.is_loss && f.dest === 'D03'" label="产线工位" required>
+          <el-select v-model="f.station_id" filterable style="width: 100%" placeholder="选择产线工位位置码">
+            <el-option v-for="l in stations" :key="l.id" :value="l.id" :label="`${l.code} ${l.name}`" />
+          </el-select>
+        </el-form-item>
+        <div v-if="!f.is_loss && f.dest === 'D02'" class="muted">送实验室后 30 天内须在物料详情里回填实验结论，超期进预警。</div>
       </template>
 
       <template v-if="kind === 'split'">
@@ -57,7 +66,17 @@
       </template>
 
       <template v-if="kind === 'transfer'">
-        <el-form-item label="受让人" required><RemoteSelect v-model="f.to_user_id" kind="user" :exclude="[line.holder_id]" /></el-form-item>
+        <el-form-item label="受让人">
+          <el-radio-group v-model="f.external">
+            <el-radio-button :value="false">从通讯录选</el-radio-button>
+            <el-radio-button :value="true">不在通讯录（外部）</el-radio-button>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item v-if="!f.external" label="受让人" required><RemoteSelect v-model="f.to_user_id" kind="user" :exclude="[line.holder_id]" /></el-form-item>
+        <el-form-item v-else label="外部受让人" required>
+          <el-input v-model="f.external_name" placeholder="姓名与单位，如：王工（供应商驻场）" />
+          <div class="muted">登记为“外部·待认领”，持有人不变；由领料专员指派到系统账号后，再由受让人确认。</div>
+        </el-form-item>
         <el-form-item label="转交原因" required><el-input v-model="f.reason" /></el-form-item>
         <div class="muted">受让人确认前不生效，原持有人仍担责；确认后超期责任随新持有人。</div>
       </template>
@@ -135,6 +154,7 @@ const kind = ref('')
 const saving = ref(false)
 const locations = ref([])
 const boxes = ref([])
+const stations = ref([])
 const f = reactive({})
 const titles = { sign: '签收', consume: '使用登记', split: '拆分换码', hold: 'WIP 暂存', move: '更新位置', transfer: '转交他人',
   return: '退库', scrap: '报废', qconfirm: '季度在用确认', renew: '长周期续期', due_change: '申请改归还日' }
@@ -147,22 +167,25 @@ async function open(k) {
   kind.value = k
   Object.keys(f).forEach(key => delete f[key])
   Object.assign(f, { qty: +props.line.balance, dest: 'D01', is_loss: false, loss_reason: null, note: '', photos: [],
-    pieces: [0], loss_qty: 0, location_id: null, to_user_id: null, reason: '', mode: 'RESIDUE', box: null, months: 6, new_date: null })
+    pieces: [0], loss_qty: 0, location_id: null, to_user_id: null, reason: '', mode: 'RESIDUE', box: null, months: 6, new_date: null,
+    ship_no: '', station_id: null, external: false, external_name: '' })
   if (k === 'consume') f.qty = 0
   visible.value = true
   if (k === 'hold' || k === 'move') locations.value = (await api.get('/api/locations')).filter(l => l.kind !== 'SCRAP_BOX')
   if (k === 'scrap') boxes.value = await api.get('/api/locations?kind=SCRAP_BOX')
+  if (k === 'consume') stations.value = await api.get('/api/locations?kind=STATION')
 }
 
 async function submit() {
   const id = props.line.id
   const body = {
     sign: () => ['sign', { photos: f.photos, note: f.note }],
-    consume: () => ['consume', { qty: f.qty, dest: f.is_loss ? null : f.dest, is_loss: f.is_loss, loss_reason: f.loss_reason, note: f.note, photos: f.photos }],
+    consume: () => ['consume', { qty: f.qty, dest: f.is_loss ? null : f.dest, is_loss: f.is_loss, loss_reason: f.loss_reason, note: f.note, photos: f.photos,
+      ship_no: f.dest === 'D01' ? f.ship_no : null, location_id: f.dest === 'D03' ? f.station_id : null }],
     split: () => ['split', { pieces: f.pieces.filter(p => +p > 0), loss_qty: f.loss_qty, loss_reason: f.loss_reason, note: f.note, photos: f.photos }],
     hold: () => ['hold', { location_id: f.location_id, note: f.note, photos: f.photos }],
     move: () => ['move', { location_id: f.location_id, note: f.note, photos: f.photos }],
-    transfer: () => ['transfer', { to_user_id: f.to_user_id, reason: f.reason }],
+    transfer: () => ['transfer', f.external ? { external_name: f.external_name, reason: f.reason } : { to_user_id: f.to_user_id, reason: f.reason }],
     return: () => ['return', { qty: f.qty, note: f.note, photos: f.photos }],
     scrap: () => ['scrap', { mode: f.mode, qty: f.qty, reason: f.reason, box: f.box, note: f.note, photos: f.photos }],
     qconfirm: () => ['qconfirm', { note: f.note, photos: f.photos }],
@@ -172,7 +195,7 @@ async function submit() {
   saving.value = true
   try {
     const res = await api.post(`/api/lines/${id}/${body[0]}`, body[1])
-    ElMessage.success(kind.value === 'transfer' ? '已发起转交，等待对方确认' : (kind.value === 'renew' || kind.value === 'due_change') ? '已提交，等待直属上级审核' : '已登记')
+    ElMessage.success(kind.value === 'transfer' ? (f.external ? '已登记外部转交，等待领料专员认领指派' : '已发起转交，等待对方确认') : (kind.value === 'renew' || kind.value === 'due_change') ? '已提交，等待直属上级审核' : '已登记')
     visible.value = false
     emit('done', res, kind.value)
   } finally { saving.value = false }

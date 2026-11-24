@@ -71,7 +71,7 @@ def test_consume_loss_and_proxy(org, ref):
     line = issue(org, ref)
     lid = line["id"]
     p = org.photo("a1")
-    assert org.post("a1", f"/api/lines/{lid}/consume", {"qty": 11, "dest": "D01", "photos": [p]}).status_code == 400
+    assert org.post("a1", f"/api/lines/{lid}/consume", {"qty": 11, "dest": "D01", "ship_no": "XSCK-T001", "photos": [p]}).status_code == 400
     assert org.post("a1", f"/api/lines/{lid}/consume", {"qty": 1, "dest": "D05", "photos": [p]}).status_code == 400
     assert org.post("a1", f"/api/lines/{lid}/consume",
                     {"qty": 1, "is_loss": True, "loss_reason": "L5", "photos": [p]}).status_code == 400
@@ -81,12 +81,12 @@ def test_consume_loss_and_proxy(org, ref):
                           {"qty": 0.7, "is_loss": True, "loss_reason": "L1", "photos": [p]}))
     assert out["loss"] == "0.7" and out["balance"] == "5.3"
     # 同组成员可代登并留痕通知；其他组成员不行
-    out = org.ok(org.post("a2", f"/api/lines/{lid}/consume", {"qty": 1, "dest": "D01", "photos": [org.photo("a2")]}))
+    out = org.ok(org.post("a2", f"/api/lines/{lid}/consume", {"qty": 1, "dest": "D01", "ship_no": "XSCK-T001", "photos": [org.photo("a2")]}))
     assert "代登" in out["flags"]
     todos = org.ok(org.get("a1", "/api/todos"))
     assert any("代您登记" in t["title"] for t in todos)
     assert org.post("b1", f"/api/lines/{lid}/consume",
-                    {"qty": 1, "dest": "D01", "photos": [org.photo("b1")]}).status_code == 403
+                    {"qty": 1, "dest": "D01", "ship_no": "XSCK-T001", "photos": [org.photo("b1")]}).status_code == 403
     dash = org.ok(org.get("head", "/api/reports/dashboard"))
     assert dash["gate"]["proxy_rate"] > 0
 
@@ -136,7 +136,7 @@ def test_hold_move_and_transfer(org, ref):
     out = org.ok(org.post("b1", f"/api/transfers/{eid}/decide?accept=true"))
     assert out["holder"] == "组员乙一" and out["status"] == "S4"
     # 责任随新持有人：原持有人不能再操作（不同组）
-    assert org.post("a1", f"/api/lines/{lid}/consume", {"qty": 1, "dest": "D01", "photos": [p]}).status_code == 403
+    assert org.post("a1", f"/api/lines/{lid}/consume", {"qty": 1, "dest": "D01", "ship_no": "XSCK-T001", "photos": [p]}).status_code == 403
 
 
 def test_overdue_blocks_hold(org, ref):
@@ -208,7 +208,7 @@ def test_close_requires_balanced_books(org, ref):
 def test_scrap_residue_and_whole(org, ref):
     l1 = issue(org, ref, qty=1)
     p = org.photo("a1")
-    org.ok(org.post("a1", f"/api/lines/{l1['id']}/consume", {"qty": 0.7, "dest": "D01", "photos": [p]}))
+    org.ok(org.post("a1", f"/api/lines/{l1['id']}/consume", {"qty": 0.7, "dest": "D01", "ship_no": "XSCK-T001", "photos": [p]}))
     out = org.ok(org.post("a1", f"/api/lines/{l1['id']}/scrap", {"mode": "RESIDUE", "photos": [p]}))
     assert out["status"] == "S7" and out["loss"] == "0.3"  # 残料不开报废单，直接结案
     assert out["codes"][0]["state"] == "B5"
@@ -309,7 +309,7 @@ def test_long_cycle_quarterly_confirm_and_renew(org, ref):
 # ------------------------------------------------------------------ 冲销（两人）
 def test_reversal_two_person(org, ref):
     line = issue(org, ref)
-    out = org.ok(org.post("a1", f"/api/lines/{line['id']}/consume", {"qty": 3, "dest": "D01", "photos": [org.photo("a1")]}))
+    out = org.ok(org.post("a1", f"/api/lines/{line['id']}/consume", {"qty": 3, "dest": "D01", "ship_no": "XSCK-T001", "photos": [org.photo("a1")]}))
     ev = [e for e in out["events"] if e["etype"] == "CONSUME"][0]
     assert org.post("a1", "/api/reversals", {"event_id": ev["id"], "reason": "数量错"}).status_code == 403
     rev = org.ok(org.post("keeper", "/api/reversals", {"event_id": ev["id"], "reason": "数量错登"}))

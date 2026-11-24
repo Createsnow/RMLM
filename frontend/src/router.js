@@ -30,8 +30,10 @@ const routes = [
       { path: 'team', component: v('Team'), meta: { title: '本组人员' } },
       { path: 'issue', component: v('Issue'), meta: { title: '开单绑定' } },
       { path: 'erp', component: v('ErpDocs'), meta: { title: 'ERP 单据' } },
-      { path: 'returns', component: v('Returns'), meta: { title: '退库分摊' } },
-      { path: 'scrap', component: v('Scrap'), meta: { title: '报废批次' } },
+      { path: 'dispose', component: v('Dispose'), meta: { title: '退库 / 报废' } },
+      { path: 'returns', redirect: '/dispose' },
+      { path: 'scrap', redirect: '/dispose?tab=scrap' },
+      { path: 'history', component: v('History'), meta: { title: '历史基线' } },
       { path: 'recon', component: v('Recon'), meta: { title: '对账与关账' } },
       { path: 'reversals', component: v('Reversals'), meta: { title: '冲销' } },
       { path: 'reports', component: v('Reports'), meta: { title: '报表' } },
@@ -49,6 +51,7 @@ const routes = [
     children: [
       { path: '', component: v('m/MHome'), meta: { title: '首页' } },
       { path: 'mine', component: v('m/MMine'), meta: { title: '我的领用' } },
+      { path: 'ledger', component: v('m/MLedger'), meta: { title: '台账' } },
       { path: 'password', component: v('Password'), meta: { title: '修改密码' } },
       ...shared
     ]

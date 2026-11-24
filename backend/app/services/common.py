@@ -13,6 +13,12 @@ def D(v) -> Decimal:
     return Decimal(str(v or 0)).quantize(Decimal("0.001"))
 
 
+def qs(v) -> str:
+    """数量转文本：去掉多余的 0（20.000 → 20，13.500 → 13.5）。"""
+    t = format(D(v).normalize(), "f")
+    return "0" if t in ("-0", "") else t
+
+
 def next_seq(db: Session, name: str) -> int:
     row = db.execute(select(Sequence).where(Sequence.name == name).with_for_update()).scalar_one_or_none()
     if row is None:

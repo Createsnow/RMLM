@@ -1,6 +1,6 @@
 <template>
   <div>
-    <div class="page-head"><h2>退库分摊</h2><span class="sub">多对多：一张退料单可摊到多行领料，一行领料也可分多次退；同一行先领先退</span></div>
+    <div class="page-head"><h2 v-if="!embedded">退库分摊</h2><span class="sub">多对多：一张退料单可摊到多行领料，一行领料也可分多次退；同一行先领先退</span></div>
     <el-row :gutter="14">
       <el-col :md="15" :xs="24">
         <div class="card" style="padding: 0">
@@ -33,6 +33,7 @@
 </template>
 
 <script setup>
+defineProps({ embedded: Boolean })
 import { computed, onMounted, ref } from 'vue'
 import { api } from '../api'
 import { hasRole } from '../store'

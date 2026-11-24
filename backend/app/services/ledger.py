@@ -14,7 +14,7 @@ from ..models import DocAlloc, Event, LedgerLine, MaterialCode
 from .common import D
 
 STOCK_TYPES = {"CONSUME", "SPLIT_OUT", "RETURN", "SCRAP"}
-ACTION_TYPES = STOCK_TYPES | {"SIGN", "HOLD", "MOVE", "TRANSFER_OK", "QCONFIRM"}
+ACTION_TYPES = STOCK_TYPES | {"SIGN", "HOLD", "MOVE", "TRANSFER_OK", "QCONFIRM", "CONCLUSION"}
 STATUS_NAMES = {
     "S0": "待签收", "S1": "在制未使用", "S2": "使用中", "S3": "WIP 暂存", "S4": "已转交",
     "S5": "超期未结案", "S6": "待单据处置", "S7": "已结案", "VOID": "已作废",

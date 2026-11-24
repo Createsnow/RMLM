@@ -431,3 +431,45 @@ class JobRun(Base):
     last_run_at: Mapped[datetime | None] = mapped_column(DateTime)
     last_key: Mapped[str | None] = mapped_column(String(32))  # 已执行过的周期标识（周/季/月），或同步任务的增量水位
     last_result: Mapped[str | None] = mapped_column(Text)  # 最近一次执行结果（同步任务用，JSON 文本）
+
+
+# ---------------------------------------------------------------- 历史基线与双轨抽查（v1.1）
+class HistoryLine(Base):
+    """旧台账导入的历史基线（只读）。只用于查询与总量核对：不生成领用行、不参与对账与验收指标。"""
+    __tablename__ = "history_line"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    batch: Mapped[str] = mapped_column(String(32), index=True)  # 导入批次号
+    row_no: Mapped[int] = mapped_column(Integer)  # Excel 行号
+    doc_no: Mapped[str | None] = mapped_column(String(64), index=True)  # 金蝶出库单号
+    doc_date: Mapped[date | None] = mapped_column(Date)
+    project_code: Mapped[str] = mapped_column(String(64))
+    project_source: Mapped[str] = mapped_column(String(16))  # SHEET 原表 / ERP 出库单回填 / VIRTUAL 试制-未立项
+    customer_code: Mapped[str | None] = mapped_column(String(32))
+    material_code: Mapped[str | None] = mapped_column(String(64))
+    material_name: Mapped[str | None] = mapped_column(String(128))
+    spec: Mapped[str | None] = mapped_column(String(255))
+    unit: Mapped[str | None] = mapped_column(String(16))
+    qty: Mapped[Decimal] = mapped_column(Qty, default=0)
+    user_name: Mapped[str | None] = mapped_column(String(64))
+    holder_name: Mapped[str | None] = mapped_column(String(64))
+    location_text: Mapped[str | None] = mapped_column(String(128))
+    dest_raw: Mapped[str | None] = mapped_column(String(255))  # 原表"去向 / 现状"原文
+    dest_code: Mapped[str | None] = mapped_column(String(8))  # 按转换规则归一后的去向，未命中为空
+    rule: Mapped[str | None] = mapped_column(String(64))  # 命中的转换规则
+    remark: Mapped[str | None] = mapped_column(Text)
+    imported_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    imported_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+
+
+class ParallelCheck(Base):
+    """双轨并行期抽查：每周抽 20 单，与旧表逐单比对。"""
+    __tablename__ = "parallel_check"
+    __table_args__ = (UniqueConstraint("week", "line_id"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    week: Mapped[str] = mapped_column(String(8), index=True)  # 2026-W45
+    line_id: Mapped[int] = mapped_column(ForeignKey("ledger_line.id"))
+    result: Mapped[str | None] = mapped_column(String(8))  # MATCH 一致 / DIFF 不一致；空为未比对
+    note: Mapped[str | None] = mapped_column(String(255))
+    checked_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    checked_at: Mapped[datetime | None] = mapped_column(DateTime)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)

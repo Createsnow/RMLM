@@ -108,6 +108,8 @@ def line_out(db: Session, line: LedgerLine, viewer: User, c=None, full: bool = F
         flags.append("待开单")
     if line.locked:
         flags.append("锁定")
+    if any(e.etype == "TRANSFER_REQ" and e.status == "PENDING" and not e.to_user_id for e in c.events):
+        flags.append("外部·待认领")
     d = {
         "id": line.id, "code": line.code, "level": line.level, "parent_id": line.parent_id, "root_id": line.root_id,
         "material_id": m.id, "material_code": m.code, "material": m.name, "spec": m.spec, "unit": m.unit,
@@ -157,13 +159,25 @@ def line_out(db: Session, line: LedgerLine, viewer: User, c=None, full: bool = F
     can = _can_operate(db, viewer, line) and not line.locked and not line.voided
     active = line.signed and c.balance > 0
     pending_transfer = next((e for e in c.events if e.etype == "TRANSFER_REQ" and e.status == "PENDING"), None)
-    d["pending_transfer"] = {"id": pending_transfer.id, "to_user": uname(pending_transfer.to_user_id)} if pending_transfer else None
+    d["pending_transfer"] = {
+        "id": pending_transfer.id, "to_user": uname(pending_transfer.to_user_id),
+        "external": (pending_transfer.extra or {}).get("external"), "reason": pending_transfer.reason,
+        "operator_id": pending_transfer.operator_id,
+    } if pending_transfer else None
+    # D02 可靠性实验：未回填结论的耗用事件
+    concluded = {(e.extra or {}).get("for") for e in c.events if e.etype == "CONCLUSION"}
+    d["lab_pending"] = [e.id for e in ledger.effective(c.events)
+                        if e.etype == "CONSUME" and e.dest == "D02" and not e.is_loss and e.id not in concluded]
     d["actions"] = {
         "sign": (not line.signed) and viewer.id == line.holder_id and not line.locked,
         "consume": can and active, "split": can and active, "return": can and active, "scrap": can and active,
         "hold": can and active and st not in ("S3", "S5"), "move": can and st == "S3",
         "transfer": can and active and pending_transfer is None,
-        "confirm_transfer": bool(pending_transfer and pending_transfer.to_user_id == viewer.id),
+        "confirm_transfer": bool(pending_transfer and pending_transfer.to_user_id
+                                 and pending_transfer.to_user_id == viewer.id),
+        "cancel_transfer": bool(pending_transfer and viewer.id in (pending_transfer.operator_id, line.holder_id)),
+        "assign_transfer": bool(pending_transfer and not pending_transfer.to_user_id and has_role(viewer, "KEEPER")),
+        "conclusion": can or viewer.id == line.holder_id,
         "qconfirm": can and active and line.long_cycle,
         "renew": can and active and line.long_cycle,
         "due_change": can and active,
