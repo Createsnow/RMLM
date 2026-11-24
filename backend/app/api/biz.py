@@ -248,10 +248,41 @@ def line_by_code(code: str, user: User = Depends(current_user), db: Session = De
         mc = db.scalar(select(MaterialCode).where(MaterialCode.code == code))
         if mc is not None and mc.replaced:
             raise BizError(f"物料码 {code} 已拆分替换（B4），不能再扫；请扫新码")
+        pending = _pending_sign_by_barcode(db, user, code)
+        if pending is not None:
+            d = line_out(db, pending, user, full=True)
+            d["sign_code"] = code  # 前端据此直接打开签收，并带上这个码
+            return d
         raise BizError(f"未找到物料码 {code}")
     if not can_view_line(db, user, line):
         raise forbid("无权查看该物料")
     return line_out(db, line, user, full=True)
+
+
+def _pending_sign_by_barcode(db: Session, user: User, code: str) -> LedgerLine | None:
+    """已接仓储：扫到的是还没签收的仓储条码 → 找本人名下同物料、待签收的行（有出库单号时按单号对）。"""
+    from ..models import ErpDoc, ErpLine, Material
+    from ..services import wms
+
+    if not wms.enabled():
+        return None
+    bc = wms.lookup(code)
+    if bc is None:
+        return None
+    mat = db.scalar(select(Material).where(Material.code == bc.material_code))
+    if mat is None:
+        return None
+    cands = list(db.scalars(select(LedgerLine).where(LedgerLine.holder_id == user.id, LedgerLine.signed.is_(False),
+                                                     LedgerLine.voided.is_(False), LedgerLine.material_id == mat.id)
+                            .order_by(LedgerLine.id)))
+    if bc.out_doc_no:
+        docs = {l.id: db.scalar(select(ErpDoc.no).join(ErpLine).where(ErpLine.id == l.erp_line_id))
+                for l in cands if l.erp_line_id}
+        matched = [l for l in cands if docs.get(l.id) == bc.out_doc_no]
+        cands = matched or [l for l in cands if l.erp_line_id is None]  # 紧急领用还没挂单的行
+    if not cands:
+        raise BizError(f"条码 {code}（物料 {bc.material_code}）不在你名下的待签收物料里")
+    return cands[0]
 
 
 def _line(db: Session, user: User, lid: int) -> LedgerLine:
@@ -323,11 +354,33 @@ def _done(db: Session, user: User, line: LedgerLine, extra: dict | None = None) 
     return d
 
 
+class SignIn(PhotoIn):
+    codes: list[str] = []  # 已接仓储时：扫到的仓储条码（一个码一条领用行）
+
+
 @router.post("/lines/{lid}/sign")
-def sign(lid: int, body: PhotoIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
+def sign(lid: int, body: SignIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
     line = _line(db, user, lid)
-    lineops.sign(db, line, user, check_photos(db, body.photos))
-    return _done(db, user, line)
+    lines = lineops.sign(db, line, user, check_photos(db, body.photos), body.codes)
+    return _done(db, user, line, {"lines": [{"id": l.id, "code": l.code, "qty": s(l.qty)} for l in lines]}
+                 if len(lines) > 1 else None)
+
+
+@router.get("/wms/barcodes/{code}")
+def wms_barcode(code: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """签收扫码时预览仓储条码（物料、数量、状态），并标出是否已被中台使用。"""
+    from ..models import MaterialCode
+    from ..services import wms
+
+    if not wms.enabled():
+        raise BizError("未配置仓储接口")
+    code = code.strip()
+    bc = wms.lookup(code)
+    if bc is None:
+        raise BizError(f"仓储系统查不到条码 {code}")
+    d = bc.as_dict()
+    d["used"] = db.scalar(select(MaterialCode.id).where(MaterialCode.code == code)) is not None
+    return d
 
 
 @router.post("/lines/{lid}/consume")

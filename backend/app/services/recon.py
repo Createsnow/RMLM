@@ -48,8 +48,11 @@ def _compute(db: Session) -> dict[str, dict]:
             base = {"period": period_of(doc.doc_date), "erp_doc_no": doc.no, "erp_line_no": ln.line_no,
                     "material_id": ln.material_id, "erp_qty": erp_qty}
             if doc.doc_type in ("LL", "AB"):
-                line = db.scalar(select(LedgerLine).where(LedgerLine.erp_line_id == ln.id))
-                detail = D(line.qty) if line else D(0)
+                # 一张单据行可能出了多个仓储条码 → 多条领用行，合计后再比
+                bound = list(db.scalars(select(LedgerLine).where(LedgerLine.erp_line_id == ln.id,
+                                                                 LedgerLine.level == 1).order_by(LedgerLine.id)))
+                line = bound[0] if bound else None
+                detail = sum((D(x.qty) for x in bound), D(0))
                 kind = "LL_MISMATCH" if line else "LL_UNBOUND"
                 rows[f"ERP:{ln.id}"] = {**base, "kind": kind, "detail_qty": detail, "line_id": line.id if line else None,
                                        "owner_hint": line.issued_by if line else None}

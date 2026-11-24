@@ -80,6 +80,16 @@ class Settings:
         self.wecom_root_dept: int = _int("WECOM_ROOT_DEPT", 1)  # 同步哪个部门及其下级
         self.wecom_api_base: str = _env("WECOM_API_BASE", "https://qyapi.weixin.qq.com").rstrip("/")
 
+        # ---------- 仓储系统（实物条码由仓储赋码；接口见 docs/仓储接口规范.md）。令牌只放 .env。
+        self.wms_base_url: str = _env("WMS_BASE_URL").strip().rstrip("/")
+        self.wms_token: str = _env("WMS_TOKEN").strip()
+        self.wms_timeout: int = _int("WMS_TIMEOUT", 10)
+
+    @property
+    def wms_enabled(self) -> bool:
+        """地址和令牌都填才启用；未启用时由本系统发 RM 临时码（仅供开发、测试、演示）。"""
+        return bool(self.wms_base_url and self.wms_token)
+
     @property
     def k3_enabled(self) -> bool:
         """金蝶连接五项都填上才启用（未填全时物料用 Excel 导入）。"""

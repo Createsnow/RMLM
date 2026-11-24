@@ -44,7 +44,7 @@ def login(body: LoginIn, db: Session = Depends(get_db)):
 @router.get("/auth/config")
 def auth_config():
     """登录页用：是否启用企业微信登录。"""
-    return {"wecom": settings.wecom_enabled}
+    return {"wecom": settings.wecom_enabled, "wms": settings.wms_enabled}
 
 
 @router.get("/auth/wecom/url")

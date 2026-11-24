@@ -5,6 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .. import clock
+from ..config import settings
 from ..errors import BizError
 from ..models import (ErpDoc, ErpLine, Event, LedgerLine, Location, Material, MaterialCode, Photo, Project, ReqItem,
                       Requisition, User)
@@ -68,7 +69,9 @@ def erp_doc_out(db: Session, doc: ErpDoc) -> dict:
     lines = []
     for ln in doc.lines:
         m = db.get(Material, ln.material_id)
-        bound = db.scalar(select(LedgerLine.code).where(LedgerLine.erp_line_id == ln.id))
+        codes = list(db.scalars(select(LedgerLine.code).where(LedgerLine.erp_line_id == ln.id, LedgerLine.level == 1)
+                                .order_by(LedgerLine.id)))
+        bound = "、".join(codes) if codes else None
         lines.append({"id": ln.id, "line_no": ln.line_no, "material_code": m.code, "material": m.name, "unit": m.unit,
                       "qty": s(ln.qty), "unit_price": s(ln.unit_price), "project_code": ln.project_code,
                       "ref_line_no": ln.ref_line_no, "bound_line": bound})
@@ -160,6 +163,7 @@ def line_out(db: Session, line: LedgerLine, viewer: User, c=None, full: bool = F
     d["pending_transfer"] = {"id": pending_transfer.id, "to_user": uname(pending_transfer.to_user_id)} if pending_transfer else None
     d["actions"] = {
         "sign": (not line.signed) and viewer.id == line.holder_id and not line.locked,
+        "sign_needs_codes": (not line.signed) and settings.wms_enabled,
         "consume": can and active, "split": can and active, "return": can and active, "scrap": can and active,
         "hold": can and active and st not in ("S3", "S5"), "move": can and st == "S3",
         "transfer": can and active and pending_transfer is None,

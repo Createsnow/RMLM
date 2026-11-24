@@ -25,8 +25,13 @@ def next_seq(db: Session, name: str) -> int:
 
 
 def new_code(db: Session) -> str:
-    """系统临时物料码（条码上线前使用）。"""
+    """本系统发的临时物料码（未配置仓储接口时使用）。"""
     return f"RM{next_seq(db, 'code'):08d}"
+
+
+def new_line_no(db: Session) -> str:
+    """签收前的领用行内部编号（已接仓储时用；签收扫码后换成仓储条码）。"""
+    return f"LN{next_seq(db, 'line'):08d}"
 
 
 def new_no(db: Session, prefix: str) -> str:

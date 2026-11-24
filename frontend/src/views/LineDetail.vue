@@ -35,7 +35,7 @@
         <el-button v-if="l.actions.qconfirm" @click="op('qconfirm')">季度在用确认</el-button>
         <el-button v-if="l.actions.renew" @click="op('renew')">续期</el-button>
         <el-button v-if="l.actions.due_change && !l.long_cycle_max" @click="op('due_change')">改归还日</el-button>
-        <el-button @click="$router.push(`/labels?ids=${l.id}`)"><el-icon><Printer /></el-icon>标签</el-button>
+        <el-button v-if="l.signed || !l.actions.sign_needs_codes" @click="$router.push(`/labels?ids=${l.id}`)"><el-icon><Printer /></el-icon>标签</el-button>
       </div>
     </div>
 
@@ -116,10 +116,17 @@ const l = ref(null)
 const ops = ref()
 const usedPct = computed(() => l.value && +l.value.qty ? Math.min(100, Math.round((1 - +l.value.balance / +l.value.qty) * 100)) : 0)
 
-async function load() { l.value = await api.get(`/api/lines/${route.params.id}`) }
+async function load() {
+  l.value = await api.get(`/api/lines/${route.params.id}`)
+  // 从扫码页扫到待签收的仓储条码过来：直接打开签收并带上这个码
+  if (route.query.sign_code && l.value.actions.sign) setTimeout(() => ops.value.open('sign', { code: String(route.query.sign_code) }))
+}
 function op(k) { ops.value.open(k) }
 function onDone(res, kind) {
   l.value = res
+  if (kind === 'sign' && res.result?.lines) {
+    ElMessageBox.alert(`扫了 ${res.result.lines.length} 个仓储条码，已分成 ${res.result.lines.length} 条领用行：${res.result.lines.map(x => `${x.code}（${x.qty}）`).join('、')}`, '签收完成')
+  }
   if (kind === 'split' && res.result) {
     ElMessageBox.confirm(`已生成新码：${res.result.children.join('、')}${res.result.remainder_code ? '，余量新码 ' + res.result.remainder_code : ''}。请打印并粘贴新标签。`, '拆分完成', { confirmButtonText: '打印标签' })
       .then(() => router.push(`/labels?codes=${[...res.result.children, res.result.remainder_code].filter(Boolean).join(',')}`)).catch(() => {})

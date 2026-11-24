@@ -6,7 +6,7 @@ import jwt
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import inspect, select, text
+from sqlalchemy import String, UniqueConstraint, inspect, select, text
 from sqlalchemy.schema import CreateColumn
 
 from . import db as dbmod
@@ -20,24 +20,41 @@ log = logging.getLogger("rmlm")
 
 
 def upgrade_schema() -> None:
-    """轻量升级：给已有表补上新增的列和索引（只增不删、不改类型）。"""
+    """轻量升级：给已有表补上新增的列和索引；字符串列只加长不缩短；
+    模型里已不再唯一的单列唯一索引（先建好普通索引）去掉唯一约束。不删列、不改其他类型。"""
     insp = inspect(dbmod.engine)
     existing = set(insp.get_table_names())
     with dbmod.engine.begin() as conn:
         for table in dbmod.Base.metadata.sorted_tables:
             if table.name not in existing:
                 continue
-            have = {c["name"] for c in insp.get_columns(table.name)}
+            cols = {c["name"]: c for c in insp.get_columns(table.name)}
             for col in table.columns:
-                if col.name not in have:
+                if col.name not in cols:
                     ddl = CreateColumn(col).compile(dialect=dbmod.engine.dialect)
                     conn.execute(text(f"ALTER TABLE `{table.name}` ADD COLUMN {ddl}"))
                     log.info("schema: %s.%s added", table.name, col.name)
+                    continue
+                want, have_len = getattr(col.type, "length", None), getattr(cols[col.name]["type"], "length", None)
+                if isinstance(col.type, String) and want and have_len and have_len < want:
+                    null = "NULL" if col.nullable else "NOT NULL"
+                    conn.execute(text(f"ALTER TABLE `{table.name}` MODIFY `{col.name}` VARCHAR({want}) {null}"))
+                    log.info("schema: %s.%s widened to %s", table.name, col.name, want)
             have_idx = {i["name"] for i in insp.get_indexes(table.name)}
             for idx in table.indexes:
                 if idx.name not in have_idx:
                     idx.create(conn)
                     log.info("schema: index %s added", idx.name)
+            model_unique = {c.name for c in table.columns if c.unique} | {
+                i.columns.keys()[0] for i in table.indexes if i.unique and len(i.columns) == 1}
+            for cons in table.constraints:
+                if isinstance(cons, UniqueConstraint) and len(cons.columns) == 1:
+                    model_unique.add(cons.columns.keys()[0])
+            for i in insp.get_indexes(table.name):
+                cols_ = i["column_names"]
+                if i.get("unique") and len(cols_) == 1 and cols_[0] not in model_unique and table.c.get(cols_[0]) is not None:
+                    conn.execute(text(f"ALTER TABLE `{table.name}` DROP INDEX `{i['name']}`"))
+                    log.info("schema: unique index %s.%s dropped", table.name, i["name"])
 
 
 def init_db() -> None:

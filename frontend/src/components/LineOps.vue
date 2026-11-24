@@ -6,6 +6,19 @@
       <el-tag v-if="isProxy" type="warning" size="small" style="margin-left: 6px">代登，将通知持有人</el-tag>
     </div>
     <el-form label-position="top" @submit.prevent>
+      <template v-if="kind === 'sign' && needCodes">
+        <el-form-item label="扫描实物上的仓储条码（一个码一条领用行，数量合计须等于本行数量）" required>
+          <ScanInput placeholder="扫描或输入仓储条码" @scan="addCode" />
+        </el-form-item>
+        <div v-for="(c, i) in f.codes" :key="c.barcode" class="code-row">
+          <span class="mono">{{ c.barcode }}</span>
+          <span class="num">{{ c.qty }} {{ c.unit || line.unit }}</span>
+          <el-button size="small" text type="danger" @click="f.codes.splice(i, 1)">移除</el-button>
+        </div>
+        <el-alert :type="codeSum === +line.qty ? 'success' : 'warning'" :closable="false" show-icon style="margin-bottom: 10px"
+                  :title="`已扫 ${f.codes.length} 个码，合计 ${codeSum} / 本行 ${line.qty} ${line.unit}`" />
+      </template>
+
       <template v-if="kind === 'consume'">
         <el-form-item label="本次登记">
           <el-radio-group v-model="f.is_loss">
@@ -127,6 +140,7 @@ import { store } from '../store'
 import { dictOptions } from '../utils'
 import PhotoPicker from './PhotoPicker.vue'
 import RemoteSelect from './RemoteSelect.vue'
+import ScanInput from './ScanInput.vue'
 
 const props = defineProps({ line: { type: Object, required: true }, mobile: Boolean })
 const emit = defineEmits(['done'])
@@ -142,12 +156,25 @@ const needPhoto = computed(() => ['sign', 'consume', 'split', 'hold', 'scrap'].i
 const isProxy = computed(() => store.user && props.line.holder_id !== store.user.id && kind.value !== 'sign')
 const sumPieces = computed(() => +(f.pieces || []).reduce((a, b) => a + (+b || 0), 0).toFixed(3))
 const remainder = computed(() => +(+props.line.balance - sumPieces.value - (+f.loss_qty || 0)).toFixed(3))
+const needCodes = computed(() => !!props.line.actions?.sign_needs_codes)
+const codeSum = computed(() => +(f.codes || []).reduce((a, c) => a + (+c.qty || 0), 0).toFixed(3))
 
-async function open(k) {
+async function addCode(code) {
+  if (f.codes.some(c => c.barcode === code)) return ElMessage.warning(`条码 ${code} 已扫过`)
+  const bc = await api.get(`/api/wms/barcodes/${encodeURIComponent(code)}`)
+  if (bc.used) return ElMessage.error(`条码 ${code} 已被其他领用行使用`)
+  if (bc.material_code !== props.line.material_code) return ElMessage.error(`条码 ${code} 是物料 ${bc.material_code}，与本行物料不符`)
+  if (bc.status !== 'OUTBOUND') return ElMessage.error(`条码 ${code} 在仓储系统中为「${bc.status_name}」，不能签收`)
+  f.codes.push(bc)
+}
+
+async function open(k, preset = {}) {
   kind.value = k
   Object.keys(f).forEach(key => delete f[key])
   Object.assign(f, { qty: +props.line.balance, dest: 'D01', is_loss: false, loss_reason: null, note: '', photos: [],
-    pieces: [0], loss_qty: 0, location_id: null, to_user_id: null, reason: '', mode: 'RESIDUE', box: null, months: 6, new_date: null })
+    pieces: [0], loss_qty: 0, location_id: null, to_user_id: null, reason: '', mode: 'RESIDUE', box: null, months: 6, new_date: null,
+    codes: [] })
+  if (k === 'sign' && preset.code && needCodes.value) addCode(preset.code).catch(() => {})
   if (k === 'consume') f.qty = 0
   visible.value = true
   if (k === 'hold' || k === 'move') locations.value = (await api.get('/api/locations')).filter(l => l.kind !== 'SCRAP_BOX')
@@ -157,7 +184,7 @@ async function open(k) {
 async function submit() {
   const id = props.line.id
   const body = {
-    sign: () => ['sign', { photos: f.photos, note: f.note }],
+    sign: () => ['sign', { photos: f.photos, note: f.note, codes: f.codes.map(c => c.barcode) }],
     consume: () => ['consume', { qty: f.qty, dest: f.is_loss ? null : f.dest, is_loss: f.is_loss, loss_reason: f.loss_reason, note: f.note, photos: f.photos }],
     split: () => ['split', { pieces: f.pieces.filter(p => +p > 0), loss_qty: f.loss_qty, loss_reason: f.loss_reason, note: f.note, photos: f.photos }],
     hold: () => ['hold', { location_id: f.location_id, note: f.note, photos: f.photos }],
@@ -184,4 +211,6 @@ defineExpose({ open })
 <style scoped>
 .head { background: #f7f9fc; border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; font-size: 13px; }
 .piece { display: flex; gap: 6px; width: 100%; margin-bottom: 6px; }
+.code-row { display: flex; gap: 12px; align-items: center; padding: 4px 0; border-bottom: 1px dashed var(--line); font-size: 13px; }
+.code-row .num { margin-left: auto; }
 </style>

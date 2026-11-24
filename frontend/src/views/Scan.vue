@@ -23,6 +23,7 @@ const last = ref('')
 async function onScan(code) {
   last.value = code
   const line = await api.get(`/api/lines/by-code/${encodeURIComponent(code)}`)
-  router.push(`${mobile.value ? '/m' : ''}/line/${line.id}`)
+  const q = line.sign_code ? `?sign_code=${encodeURIComponent(line.sign_code)}` : ''
+  router.push(`${mobile.value ? '/m' : ''}/line/${line.id}${q}`)
 }
 </script>

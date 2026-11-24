@@ -233,13 +233,14 @@ class ErpLine(Base):
 class LedgerLine(Base):
     __tablename__ = "ledger_line"
     id: Mapped[int] = mapped_column(primary_key=True)
-    code: Mapped[str] = mapped_column(String(32), unique=True)  # 当前有效物料码
+    code: Mapped[str] = mapped_column(String(64), unique=True)  # 当前有效物料码（签收前为系统内部编号）
     root_id: Mapped[int | None] = mapped_column(Integer)  # 根行（父行）id，根行指向自己
     parent_id: Mapped[int | None] = mapped_column(ForeignKey("ledger_line.id"))
     level: Mapped[int] = mapped_column(Integer, default=1)  # 1 父行 / 2 子行
     requisition_id: Mapped[int] = mapped_column(ForeignKey("requisition.id"))
     req_item_id: Mapped[int | None] = mapped_column(ForeignKey("req_item.id"))
-    erp_line_id: Mapped[int | None] = mapped_column(ForeignKey("erp_line.id"), unique=True)
+    # 一张领料单行出了几个仓储条码，签收时就分成几条领用行（一个码只挂一行），所以这里不唯一
+    erp_line_id: Mapped[int | None] = mapped_column(ForeignKey("erp_line.id"), index=True)
     project_id: Mapped[int] = mapped_column(ForeignKey("project.id"))
     material_id: Mapped[int] = mapped_column(ForeignKey("material.id"))
     qty: Mapped[Decimal] = mapped_column(Qty)  # 本行初始数量
@@ -269,12 +270,14 @@ class LedgerLine(Base):
 
 
 class MaterialCode(Base):
-    """物料码。条码系统上线前由本系统生成临时码（RM 开头），上线后可直接写入仓储条码。"""
+    """物料码。正式环境由仓储系统赋码（签收时扫码绑定、拆分时向仓储申请新码）；
+    未配置仓储接口时由本系统发 RM 开头的临时码。"""
     __tablename__ = "material_code"
     id: Mapped[int] = mapped_column(primary_key=True)
-    code: Mapped[str] = mapped_column(String(32), unique=True)
+    code: Mapped[str] = mapped_column(String(64), unique=True)
     line_id: Mapped[int] = mapped_column(ForeignKey("ledger_line.id"))
-    parent_code: Mapped[str | None] = mapped_column(String(32))
+    parent_code: Mapped[str | None] = mapped_column(String(64))
+    source: Mapped[str] = mapped_column(String(8), default="RM", server_default="RM")  # WMS 仓储条码 / RM 本系统临时码
     layer: Mapped[int] = mapped_column(Integer, default=1)  # 最多 3 层
     qty_init: Mapped[Decimal] = mapped_column(Qty)
     replaced: Mapped[bool] = mapped_column(Boolean, default=False)  # B4 已拆分替换
@@ -286,7 +289,7 @@ class Event(Base):
     __tablename__ = "event"
     id: Mapped[int] = mapped_column(primary_key=True)
     line_id: Mapped[int] = mapped_column(ForeignKey("ledger_line.id"), index=True)
-    code: Mapped[str | None] = mapped_column(String(32))
+    code: Mapped[str | None] = mapped_column(String(64))
     etype: Mapped[str] = mapped_column(String(16))
     qty: Mapped[Decimal] = mapped_column(Qty, default=0)
     dest: Mapped[str | None] = mapped_column(String(8))

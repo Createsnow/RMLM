@@ -54,6 +54,10 @@ services:
       WECOM_SECRET: ${WECOM_SECRET:-}
       WECOM_CONTACT_SECRET: ${WECOM_CONTACT_SECRET:-}
       WECOM_ROOT_DEPT: ${WECOM_ROOT_DEPT:-1}
+      # 仓储系统（实物条码）；容器须能访问仓储系统地址
+      WMS_BASE_URL: ${WMS_BASE_URL:-}
+      WMS_TOKEN: ${WMS_TOKEN:-}
+      WMS_TIMEOUT: ${WMS_TIMEOUT:-10}
     volumes:
       - photos:/data/photos   # 照片永久保存，请纳入备份
     ports:

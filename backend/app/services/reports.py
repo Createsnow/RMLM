@@ -8,8 +8,9 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from .. import clock
-from ..models import (DocAlloc, Event, LedgerLine, Material, OverdueSnapshot, Project, ReconDiff, Requisition,
-                      Todo, User)
+from ..config import settings
+from ..models import (DocAlloc, Event, LedgerLine, Material, MaterialCode, OverdueSnapshot, Project, ReconDiff,
+                      Requisition, Todo, User)
 from ..perms import visible_user_ids
 from . import ledger
 from .common import D, quarter_of
@@ -54,7 +55,7 @@ def dashboard(db: Session, user: User) -> dict:
     roots = [l for l in lines if l.level == 1]
     gate = {
         "project_link_rate": _pct(sum(1 for l in roots if projects[l.project_id].source == "ERP"), len(roots)),
-        "code_bind_rate": _pct(sum(1 for l in roots if l.signed and l.code), sum(1 for l in roots if l.signed) or 0),
+        "code_bind_rate": _code_bind_rate(db, roots),
         "proxy_rate": _pct(sum(1 for e in events if e.is_proxy), len(events)),
     }
     gate["passed"] = (gate["project_link_rate"] in (None, 100.0)
@@ -70,6 +71,17 @@ def dashboard(db: Session, user: User) -> dict:
         "observe": observe(db, lines, calcs),
         "todos": db.scalar(select(func.count()).select_from(Todo).where(Todo.user_id == user.id, Todo.state == "OPEN")),
     }
+
+
+def _code_bind_rate(db: Session, roots: list[LedgerLine]) -> float | None:
+    """码绑定率 = 已绑定实物码的行 / 已签收行。接了仓储后只认仓储条码（签收时扫码绑定），本系统临时码不算。"""
+    signed = [l for l in roots if l.signed]
+    if not settings.wms_enabled:
+        return _pct(sum(1 for l in signed if l.code), len(signed))
+    ids = [l.id for l in signed]
+    bound = set(db.scalars(select(MaterialCode.line_id).where(MaterialCode.line_id.in_(ids or [0]),
+                                                              MaterialCode.layer == 1, MaterialCode.source == "WMS")))
+    return _pct(sum(1 for l in signed if l.id in bound), len(signed))
 
 
 def observe(db: Session, lines: list[LedgerLine], calcs) -> dict:

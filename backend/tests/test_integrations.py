@@ -251,7 +251,7 @@ def test_wecom_contact_sync(org, ref, wx):
 
 
 def test_wecom_login(org, ref, wx):
-    assert org.c.get("/api/auth/config").json() == {"wecom": True}
+    assert org.c.get("/api/auth/config").json() == {"wecom": True, "wms": False}
     u = org.c.get("/api/auth/wecom/url", params={"next": "/m/req/5"}).json()
     assert "redirect_uri=https://rmlm.example.com/login?next=/m/req/5" in u["url"] and u["state"]
     wx.code_map = {"c-ok": "li.a1", "c-unbound": "nobody"}

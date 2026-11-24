@@ -3,7 +3,7 @@
     <div class="bar no-print">
       <el-button type="primary" @click="print"><el-icon><Printer /></el-icon>打印</el-button>
       <el-button @click="$router.back()">返回</el-button>
-      <span class="muted">标签 50×30mm，可直接发送到标签打印机；条码系统上线后改用仓储条码。</span>
+      <span class="muted">标签 50×30mm，可直接发送到标签打印机。二维码内容即物料码原文（已接仓储时为仓储系统发的码）。</span>
     </div>
     <div v-for="x in items" :key="x.code" class="label">
       <img :src="x.qr" />

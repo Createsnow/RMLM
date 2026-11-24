@@ -95,8 +95,7 @@ def set_posted(db: Session, op: User, doc: ErpDoc, posted: bool) -> ErpDoc:
 def after_doc_change(db: Session, doc: ErpDoc) -> None:
     if doc.doc_type in ("LL", "AB"):
         for ln in doc.lines:
-            line = db.scalar(select(LedgerLine).where(LedgerLine.erp_line_id == ln.id))
-            if line is not None:
+            for line in list(db.scalars(select(LedgerLine).where(LedgerLine.erp_line_id == ln.id, LedgerLine.level == 1))):
                 reqsvc.refresh_urgent(db, line)
                 if doc.posted and not line.signed:
                     add_todo(db, line.holder_id, "SIGN", f"请签收物料 {line.code}", "line", line.id, dedupe=True)
@@ -210,16 +209,19 @@ def _bind(db: Session, op: User | None, item: ReqItem, erp: ErpLine) -> LedgerLi
         raise BizError("ERP 单据行的物料与申请不一致")
     if db.scalar(select(LedgerLine.id).where(LedgerLine.erp_line_id == erp.id)):
         raise BizError("该 ERP 单据行已绑定（一物一行）")
-    urgent_line = db.scalar(select(LedgerLine).where(LedgerLine.req_item_id == item.id,
-                                                     LedgerLine.erp_line_id.is_(None), LedgerLine.urgent.is_(True),
-                                                     LedgerLine.level == 1))
-    if urgent_line is not None:
-        urgent_line.erp_line_id = erp.id
-        if erp.unit_price is not None:
-            urgent_line.unit_price = erp.unit_price
-        reqsvc.refresh_urgent(db, urgent_line)
+    # 紧急领用已先交接（签收时可能按条码分成了多条行）：补挂单据
+    urgent_lines = list(db.scalars(select(LedgerLine).where(LedgerLine.req_item_id == item.id,
+                                                             LedgerLine.erp_line_id.is_(None),
+                                                             LedgerLine.urgent.is_(True), LedgerLine.level == 1)
+                                   .order_by(LedgerLine.id)))
+    if urgent_lines:
+        for ul in urgent_lines:
+            ul.erp_line_id = erp.id
+            if erp.unit_price is not None:
+                ul.unit_price = erp.unit_price
+            reqsvc.refresh_urgent(db, ul)
         close_todos(db, "erpline", erp.id)
-        return urgent_line
+        return urgent_lines[0]
     if req.status != "APPROVED":
         raise BizError("申请未经直属上级审核，不能开单")
     line = reqsvc._new_line(db, op, req, item, qty=erp.qty, erp_line=erp)
