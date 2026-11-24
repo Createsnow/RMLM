@@ -1,7 +1,7 @@
 <title>RMLM 总体架构</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <style>
-/* 布局：单栏阅读页，两张可横向滚动的大图 + 改动清单 + 边界说明 */
+/* 布局：单栏阅读页，两张可横向滚动的大图 + 边界说明 + 待确认口径 */
 :root{
   --bg:#f5f7fa; --surface:#ffffff; --fg:#16202c; --muted:#5a6676; --line:#cdd5df;
   --lane:#eceff4; --accent:#1d5fbf; --accent-soft:#e4edfb; --erp:#a8620a; --erp-soft:#fbefdc;
@@ -32,18 +32,6 @@ section{display:grid;gap:10px;min-width:0}
 .cap{color:var(--muted);font-size:13px;margin:0;max-width:80ch}
 ul.bounds{margin:0;padding-left:1.2em;display:grid;gap:6px;max-width:80ch}
 ul.bounds b{color:var(--fg)}
-/* 改动清单 */
-.tbl{overflow-x:auto;background:var(--surface);border:1px solid var(--line);border-radius:10px}
-table{border-collapse:collapse;width:100%;min-width:720px;font-size:13px}
-th,td{text-align:left;vertical-align:top;padding:9px 12px;border-bottom:1px solid var(--line)}
-th{font-size:12px;color:var(--muted);font-weight:700;letter-spacing:.04em;background:var(--lane)}
-tr:last-child td{border-bottom:0}
-td.src{white-space:nowrap;font-weight:700}
-td.where{color:var(--muted);font-size:12px;white-space:nowrap}
-code{font-family:var(--f-mono);font-size:12px}
-.chip{display:inline-block;font-size:11px;font-weight:700;padding:0 7px;border-radius:9px;margin-right:4px;
-  background:var(--new-soft);color:var(--new);border:1px solid var(--new)}
-.chip.p{background:var(--accent-soft);color:var(--accent);border-color:var(--accent)}
 ol.ask{margin:0;padding-left:1.4em;display:grid;gap:6px;max-width:80ch}
 /* SVG 元素 */
 svg text{font-family:var(--f-body);fill:var(--fg)}
@@ -199,29 +187,7 @@ svg text{font-family:var(--f-body);fill:var(--fg)}
 </section>
 
 <section>
-  <h2>三、本次对齐改动</h2>
-  <div class="tbl"><table>
-    <thead><tr><th>依据</th><th>改动</th><th>落在哪里</th></tr></thead>
-    <tbody>
-      <tr><td class="src">业务确认 · 蓝图 4.3</td><td><span class="chip p">改动</span>物料码改用仓储系统的码，本系统不再发 RM 码。仓储赋码清单接口同步、Excel 兜底；签收扫仓储码绑定到行；拆分扫仓储预发的新标签；已发出的 RM 码由领料专员逐行补绑，补绑后 RM 码作废。码绑定率按“已绑仓储码的行 / 已签收行”计。</td><td class="where">新表 wms_code · 签收 / 拆分 · 主数据 → 仓储码</td></tr>
-      <tr><td class="src">蓝图 3.1 · 原型「扫码过账」</td><td><span class="chip">新增</span>扫码为主、选单为备。一个扫码入口识别物料码、ERP 单据号、库位码和申请号；单据号列出各行，逐行签收。已拆分替换（B4）的旧码直接提示“请扫新码”。</td><td class="where">后端 <code>/api/scan</code> · 扫码页（电脑 / 手机）</td></tr>
-      <tr><td class="src">蓝图 4.1 去向七类</td><td><span class="chip">新增</span>D01 项目成品必填出货单号；D03 产线试用必选产线工位；D02 可靠性实验回填结论，30 天未回填派预警待办，周报列出。</td><td class="where">lineops · jobs · 使用登记 · 物料详情</td></tr>
-      <tr><td class="src">蓝图 3.3 暂存与转交</td><td><span class="chip">新增</span>受让人不在通讯录时登记为“外部·待认领”，不改持有人；领料专员指派账号后由受让人确认；发起人可撤回待确认的转交。</td><td class="where">lineops · 物料详情 · 待办</td></tr>
-      <tr><td class="src">蓝图 5.2 旧表不迁移</td><td><span class="chip">新增</span>历史基线：旧台账 Excel 导入为只读基线；去向和位置按转换规则归一；缺项目号的按 ERP 出库单回查回填，补不到的挂“试制-未立项”；可按单号做总量核对。</td><td class="where">新表 history_line · 主数据 → 历史基线</td></tr>
-      <tr><td class="src">蓝图 表 5-1 双轨过渡</td><td><span class="chip">新增</span>双轨抽查：每周从新签收的行里抽 20 单与旧表比对，登记一致 / 不一致，算当周一致率，连续两周 ≥ 95% 时提示可进入收口。</td><td class="where">新表 parallel_check · 报表</td></tr>
-      <tr><td class="src">蓝图 表 5-3 · 5.3</td><td><span class="chip p">改动</span>验收六个数字同屏（三项门槛 + 三项观察）；字典季度复盘给出每个枚举的使用率，零使用或低于 1% 标“建议合并 / 停用”。</td><td class="where">看板 · 报表</td></tr>
-      <tr><td class="src">原型「总览看板」</td><td><span class="chip p">改动</span>补齐报废待批次处置、对账差异、今日登记三个数字，以及在制结存按项目、需要今天处理、最近流向事件三块。</td><td class="where">看板接口与页面</td></tr>
-      <tr><td class="src">原型「领用台账」</td><td><span class="chip p">改动</span>每行显示结存构成条（耗 / 损 / 退 / 废 / 存）。</td><td class="where">台账页</td></tr>
-      <tr><td class="src">原型「退库 / 报废」</td><td><span class="chip p">改动</span>退库分摊与报废批次合并为一个工作台，菜单只留一项。</td><td class="where">前端</td></tr>
-      <tr><td class="src">原型「ERP 对账」</td><td><span class="chip p">改动</span>差异池上方汇总已平 / 差异 / 差异率（目标 &lt; 2%）。</td><td class="where">对账接口与页面</td></tr>
-      <tr><td class="src">原型「字典与规则」</td><td><span class="chip p">改动</span>字典页展示旧台账 → 新系统转换规则，与历史基线导入用的是同一套。</td><td class="where">字典页</td></tr>
-      <tr><td class="src">原型手机端</td><td><span class="chip p">改动</span>首页加关键数字、待我处理的物料、最近登记；底部导航加“台账”。</td><td class="where">手机端</td></tr>
-    </tbody>
-  </table></div>
-</section>
-
-<section>
-  <h2>四、对外边界</h2>
+  <h2>三、对外边界</h2>
   <ul class="bounds">
     <li><b>金蝶只读。</b>中台不写金蝶，两边只用“单据号 + 行号 + 数量”对账。物料档案每天增量同步；领料 / 退料 / 报废单每 15 分钟拉取，领料单过账后按备注里的申请号自动生成领用行，使用人直接签收；匹配不上的由领料专员手工绑定。单据和项目档案的金蝶表单待确认后接入。</li>
     <li><b>物料码取自仓储。</b>条码由仓储系统统一赋码，本系统不另编一套码，只读仓储的赋码清单（码、物料编码、数量、批次；空白码不带物料，供拆分用）。清单按接口同步，字段待仓储确认；接口未通时由领料专员或仓库导入 Excel。拆分守恒、最多三层、父子追溯照旧。</li>
@@ -232,7 +198,7 @@ svg text{font-family:var(--f-body);fill:var(--fg)}
 </section>
 
 <section>
-  <h2>五、开发中按建议默认、请业务确认的口径</h2>
+  <h2>四、开发中按建议默认、请业务确认的口径</h2>
   <ol class="ask">
     <li>D02 可靠性实验的结论回填期限默认 30 天，超期派预警待办给持有人，并按现有机制 48 小时升级直属上级。</li>
     <li>外部受让人由领料专员指派到系统账号（新人先开号或等企微通讯录同步）；指派前持有人和超期责任都不变。</li>
