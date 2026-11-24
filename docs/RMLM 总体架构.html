@@ -277,9 +277,9 @@ svg text{font-family:var(--f-body);fill:var(--fg)}
     n8:[2,9,"认领差异",["选原因码·消差"],"电脑端"],
     n9:[3,10,"关闭与关账",["差异清零才关账","每月 3 日前"],"电脑端"]
   };
-  // [起点, 终点, 标注, 虚线=系统自动拉取数据]
+  // [起点, 终点, 标注, 虚线=系统自动拉取数据, "bottom"=从终点底部进入（避免与同一终点的其他连线重叠）]
   var E=[["n1","s1"],["s1","x1"],["x1","n2"],["n2","n3"],["n3","e1","过账"],["w1","w2"],
-         ["e1","s2","拉单",1],["w2","s2","赋码清单",1],["s2","x2"],["x2","n4"],["n4","n5"],["n5","n6"],
+         ["e1","s2","拉单",1],["w2","s2","赋码清单",1,"bottom"],["s2","x2"],["x2","n4"],["n4","n5"],["n5","n6"],
          ["n6","n7"],["n7","e2","过账"],["e2","w3"],["e2","s3","拉单",1],["s3","s4"],["s4","x3"],["x3","n8"],["n8","n9"]];
   function bx(id){var n=N[id];return {x:LW+n[1]*CW+7,y:n[0]*LH+10,l:n[0],c:n[1]}}
   var s='<defs><marker id="ah2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="ah"/></marker></defs>';
@@ -297,7 +297,11 @@ svg text{font-family:var(--f-body);fill:var(--fg)}
   s+='<line x1="'+LW+'" x2="'+LW+'" y1="0" y2="'+H+'" class="lanesep"/>';
   E.forEach(function(e){
     var a=bx(e[0]), b=bx(e[1]), d;
-    if(a.c===b.c){
+    if(e[4]==='bottom'){
+      var bsx=a.x+BW, bsy=a.y+BH/2, bcx=b.x+BW/2;
+      d='M'+bsx+','+bsy+' H'+bcx+' V'+(b.y+BH+2);
+      if(e[2]) s+='<text x="'+(bsx+8)+'" y="'+(bsy-5)+'" class="c">'+e[2]+'</text>';
+    } else if(a.c===b.c){
       var x=a.x+BW/2;
       d=b.l>a.l ? 'M'+x+','+(a.y+BH)+' V'+(b.y-2) : 'M'+x+','+a.y+' V'+(b.y+BH+2);
       if(e[2]) s+='<text x="'+(x+6)+'" y="'+((b.l>a.l?a.y+BH+b.y:a.y+b.y+BH)/2+4)+'" class="c">'+e[2]+'</text>';
