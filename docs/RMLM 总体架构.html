@@ -1,20 +1,22 @@
-<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
 <title>RMLM 总体架构</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <style>
-/* 布局：单栏阅读页，两张可横向滚动的大图 + 一段边界说明 */
+/* 布局：单栏阅读页，两张可横向滚动的大图 + 改动清单 + 边界说明 */
 :root{
   --bg:#f5f7fa; --surface:#ffffff; --fg:#16202c; --muted:#5a6676; --line:#cdd5df;
   --lane:#eceff4; --accent:#1d5fbf; --accent-soft:#e4edfb; --erp:#a8620a; --erp-soft:#fbefdc;
+  --new:#0f7a6c; --new-soft:#e2f4f0;
   --f-body:"PingFang SC","Microsoft YaHei","Noto Sans SC","Hiragino Sans GB",system-ui,sans-serif;
   --f-mono:ui-monospace,"SF Mono",Consolas,monospace;
 }
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
   --bg:#10151b; --surface:#1a2129; --fg:#e5eaf0; --muted:#98a4b2; --line:#36414e;
-  --lane:#151b22; --accent:#73a6f2; --accent-soft:#1b2a3f; --erp:#e3a550; --erp-soft:#322717; color-scheme:dark}}
+  --lane:#151b22; --accent:#73a6f2; --accent-soft:#1b2a3f; --erp:#e3a550; --erp-soft:#322717;
+  --new:#4fc7b4; --new-soft:#15302c; color-scheme:dark}}
 :root[data-theme="dark"]{
   --bg:#10151b; --surface:#1a2129; --fg:#e5eaf0; --muted:#98a4b2; --line:#36414e;
-  --lane:#151b22; --accent:#73a6f2; --accent-soft:#1b2a3f; --erp:#e3a550; --erp-soft:#322717; color-scheme:dark}
+  --lane:#151b22; --accent:#73a6f2; --accent-soft:#1b2a3f; --erp:#e3a550; --erp-soft:#322717;
+  --new:#4fc7b4; --new-soft:#15302c; color-scheme:dark}
 body{background:var(--bg);color:var(--fg);font-family:var(--f-body);line-height:1.65}
 .wrap{max-width:1120px;margin:0 auto;padding-block:32px 56px;
   padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
@@ -22,7 +24,7 @@ body{background:var(--bg);color:var(--fg);font-family:var(--f-body);line-height:
 header{display:grid;gap:6px}
 h1{font-size:26px;margin:0;text-wrap:balance;letter-spacing:.01em}
 h2{font-size:18px;margin:0 0 4px;text-wrap:balance}
-.lead{color:var(--muted);margin:0;max-width:68ch}
+.lead{color:var(--muted);margin:0;max-width:72ch}
 section{display:grid;gap:10px;min-width:0}
 .scroll{overflow-x:auto;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px}
 .scroll svg{display:block;width:100%;height:auto}
@@ -30,6 +32,19 @@ section{display:grid;gap:10px;min-width:0}
 .cap{color:var(--muted);font-size:13px;margin:0;max-width:80ch}
 ul.bounds{margin:0;padding-left:1.2em;display:grid;gap:6px;max-width:80ch}
 ul.bounds b{color:var(--fg)}
+/* 改动清单 */
+.tbl{overflow-x:auto;background:var(--surface);border:1px solid var(--line);border-radius:10px}
+table{border-collapse:collapse;width:100%;min-width:720px;font-size:13px}
+th,td{text-align:left;vertical-align:top;padding:9px 12px;border-bottom:1px solid var(--line)}
+th{font-size:12px;color:var(--muted);font-weight:700;letter-spacing:.04em;background:var(--lane)}
+tr:last-child td{border-bottom:0}
+td.src{white-space:nowrap;font-weight:700}
+td.where{color:var(--muted);font-size:12px;white-space:nowrap}
+code{font-family:var(--f-mono);font-size:12px}
+.chip{display:inline-block;font-size:11px;font-weight:700;padding:0 7px;border-radius:9px;margin-right:4px;
+  background:var(--new-soft);color:var(--new);border:1px solid var(--new)}
+.chip.p{background:var(--accent-soft);color:var(--accent);border-color:var(--accent)}
+ol.ask{margin:0;padding-left:1.4em;display:grid;gap:6px;max-width:80ch}
 /* SVG 元素 */
 svg text{font-family:var(--f-body);fill:var(--fg)}
 .t{font-size:13px;font-weight:700}
@@ -39,18 +54,22 @@ svg text{font-family:var(--f-body);fill:var(--fg)}
 .box{fill:var(--surface);stroke:var(--line);stroke-width:1.2}
 .app{fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5}
 .mod{fill:var(--surface);stroke:var(--accent);stroke-opacity:.45;stroke-width:1}
+.modn{fill:var(--surface);stroke:var(--new);stroke-width:1.5}
+.tag-n{fill:var(--new)}
 .erpb{fill:var(--erp-soft);stroke:var(--erp);stroke-width:1.3}
 .wxb{fill:var(--surface);stroke:var(--accent);stroke-width:1.3}
 .dash{stroke-dasharray:5 4}
 .none{fill:none;stroke:var(--line);stroke-width:1.2;stroke-dasharray:4 4}
 .tag-a{fill:var(--accent)} .tag-e{fill:var(--erp)}
 .tagt{font-size:11px;font-weight:700;fill:var(--surface)}
+.tagn{font-size:10px;font-weight:700;fill:var(--surface)}
 .ln{stroke:var(--muted);stroke-width:1.4;fill:none}
 .ah{fill:var(--muted)}
 .lane0{fill:var(--lane)} .lane1{fill:var(--bg)}
 .lanesep{stroke:var(--line);stroke-width:1}
 .lanet{font-size:12.5px;font-weight:700}
 .n-act{fill:var(--surface);stroke:var(--line);stroke-width:1.2}
+.n-new{fill:var(--new-soft);stroke:var(--new);stroke-width:1.4}
 .n-sys{fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.3}
 .n-erp{fill:var(--erp-soft);stroke:var(--erp);stroke-width:1.3}
 .nt{font-size:12.5px;font-weight:700}
@@ -60,17 +79,17 @@ svg text{font-family:var(--f-body);fill:var(--fg)}
 <div class="wrap">
 <header>
   <h1>研发物料管家 RMLM 总体架构</h1>
-  <p class="lead">依据业务蓝图与系统方案 v1 绘制，已按新调整更新：确定使用企业微信（登录、工作台入口、通讯录、消息推送）；不对接仓储系统；金蝶单据由系统自动拉取，开单过账后使用人直接签收，不需要人工导入。</p>
+  <p class="lead">v1.1：按业务已确认的《业务蓝图（简版）V1.1》和《双端可操作原型》对齐。在 v1 的基础上补齐“扫码为主、选单为备”、去向附加要求、外部受让待认领、历史基线、双轨抽查、六项验收指标，看板和手机端按原型重排。绿色标出的是本次新增或改动的部分。外部边界不变：金蝶只读、确定使用企业微信、不对接仓储与 OA。</p>
 </header>
 
 <section>
   <h2>一、系统架构</h2>
   <div class="scroll">
-  <svg id="arch" viewBox="0 0 1000 600" role="img" aria-label="系统架构图：终端、RMLM 应用、数据层与外部系统">
+  <svg id="arch" viewBox="0 0 1000 716" role="img" aria-label="系统架构图：终端、RMLM 应用（含本次新增模块）、数据层与外部系统">
     <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="ah"/></marker></defs>
 
     <text x="40" y="24" class="c">终端</text>
-    <rect x="40" y="34" width="140" height="56" rx="8" class="box"/><text x="110" y="58" text-anchor="middle" class="t">标签打印机</text><text x="110" y="78" text-anchor="middle" class="s">RM 码 50×30mm</text>
+    <rect x="40" y="34" width="140" height="56" rx="8" class="box"/><text x="110" y="58" text-anchor="middle" class="t">标签打印机</text><text x="110" y="78" text-anchor="middle" class="s">RM 码（一期行码）</text>
     <rect x="206" y="34" width="150" height="56" rx="8" class="box"/><text x="281" y="58" text-anchor="middle" class="t">电脑端管理台</text><text x="281" y="78" text-anchor="middle" class="s">领料专员/主管/财务/IT</text>
     <rect x="372" y="34" width="150" height="56" rx="8" class="box"/><text x="447" y="58" text-anchor="middle" class="t">企微 H5（/m）</text><text x="447" y="78" text-anchor="middle" class="s">工作台入口 · 免密登录</text>
     <rect x="538" y="34" width="150" height="56" rx="8" class="box"/><text x="613" y="58" text-anchor="middle" class="t">PDA 扫码枪</text><text x="613" y="78" text-anchor="middle" class="s">按键盘输入识别</text>
@@ -79,9 +98,10 @@ svg text{font-family:var(--f-body);fill:var(--fg)}
     <path d="M281,90 V104 M447,90 V104 M613,90 V104 M281,104 H613" class="ln"/>
     <path d="M447,104 V127" class="ln" marker-end="url(#ah)"/><text x="457" y="121" class="c">HTTPS · DMZ 反向代理（企业备案域名）</text>
 
-    <rect x="40" y="130" width="650" height="300" rx="10" class="app"/>
+    <rect x="40" y="130" width="650" height="412" rx="10" class="app"/>
     <text x="60" y="156" class="h">研发物料管家 RMLM<tspan class="s" font-weight="400">　FastAPI 后端 + Vue 3 前端（同一服务托管）</tspan></text>
 
+    <!-- 第一行：业务主链 -->
     <rect x="60" y="172" width="143" height="96" rx="7" class="mod"/><text x="131.5" y="196" text-anchor="middle" class="t">申请与审核</text>
       <text x="131.5" y="218" text-anchor="middle" class="s">项目从 ERP 档案选</text><text x="131.5" y="236" text-anchor="middle" class="s">直属上级同意/驳回</text><text x="131.5" y="254" text-anchor="middle" class="s">紧急领用先领后审</text>
     <rect x="215" y="172" width="143" height="96" rx="7" class="mod"/><text x="286.5" y="196" text-anchor="middle" class="t">台账与动作</text>
@@ -91,20 +111,37 @@ svg text{font-family:var(--f-body);fill:var(--fg)}
     <rect x="525" y="172" width="143" height="96" rx="7" class="mod"/><text x="596.5" y="196" text-anchor="middle" class="t">对账与关账</text>
       <text x="596.5" y="218" text-anchor="middle" class="s">单号+行号+数量</text><text x="596.5" y="236" text-anchor="middle" class="s">差异认领·原因码</text><text x="596.5" y="254" text-anchor="middle" class="s">每月 3 日前关账</text>
 
+    <!-- 第二行：支撑 -->
     <rect x="60" y="284" width="143" height="96" rx="7" class="mod"/><text x="131.5" y="308" text-anchor="middle" class="t">主数据与账号</text>
       <text x="131.5" y="330" text-anchor="middle" class="s">物料同步·项目·库位</text><text x="131.5" y="348" text-anchor="middle" class="s">企微通讯录同步·角色</text><text x="131.5" y="366" text-anchor="middle" class="s">停用前结存须清零</text>
     <rect x="215" y="284" width="143" height="96" rx="7" class="mod"/><text x="286.5" y="308" text-anchor="middle" class="t">待办与通知</text>
       <text x="286.5" y="330" text-anchor="middle" class="s">站内待办</text><text x="286.5" y="348" text-anchor="middle" class="s">三级升级</text><text x="286.5" y="366" text-anchor="middle" class="s">推送企微应用消息</text>
-    <rect x="370" y="284" width="143" height="96" rx="7" class="mod"/><text x="441.5" y="308" text-anchor="middle" class="t">报表看板</text>
-      <text x="441.5" y="330" text-anchor="middle" class="s">验收三项门槛</text><text x="441.5" y="348" text-anchor="middle" class="s">超期·代登·损耗</text><text x="441.5" y="366" text-anchor="middle" class="s">项目用量与金额</text>
-    <rect x="525" y="284" width="143" height="96" rx="7" class="mod"/><text x="596.5" y="304" text-anchor="middle" class="t">定时任务</text>
-      <text x="596.5" y="324" text-anchor="middle" class="s">每 15 分钟：拉单·升级·补发</text><text x="596.5" y="340" text-anchor="middle" class="s">每日：对账·超期·同步</text><text x="596.5" y="356" text-anchor="middle" class="s">每周：报废批次</text><text x="596.5" y="372" text-anchor="middle" class="s">季度确认·月初关账提醒</text>
+    <rect x="370" y="284" width="143" height="96" rx="7" class="modn"/><rect x="471" y="291" width="36" height="16" rx="8" class="tag-n"/><text x="489" y="303" text-anchor="middle" class="tagn">改动</text>
+      <text x="441.5" y="308" text-anchor="middle" class="t">报表看板</text>
+      <text x="441.5" y="330" text-anchor="middle" class="s">验收六个数字</text><text x="441.5" y="348" text-anchor="middle" class="s">按项目在制·今日待办</text><text x="441.5" y="366" text-anchor="middle" class="s">流向事件·字典复盘</text>
+    <rect x="525" y="284" width="143" height="96" rx="7" class="modn"/><rect x="626" y="291" width="36" height="16" rx="8" class="tag-n"/><text x="644" y="303" text-anchor="middle" class="tagn">改动</text>
+      <text x="596.5" y="304" text-anchor="middle" class="t">定时任务</text>
+      <text x="596.5" y="324" text-anchor="middle" class="s">每 15 分钟：拉单·升级·补发</text><text x="596.5" y="340" text-anchor="middle" class="s">每日：对账·超期·同步</text><text x="596.5" y="356" text-anchor="middle" class="s">＋ D02 结论回填预警</text><text x="596.5" y="372" text-anchor="middle" class="s">每周报废批次·季度确认</text>
 
-    <text x="60" y="410" class="s">原则：事件只增不改 · 结存由事件推算 · 改错用冲销 · 金蝶只读 · 密钥只放 .env</text>
+    <!-- 第三行：本次新增 -->
+    <rect x="60" y="396" width="143" height="96" rx="7" class="modn"/><rect x="161" y="403" width="36" height="16" rx="8" class="tag-n"/><text x="179" y="415" text-anchor="middle" class="tagn">新增</text>
+      <text x="131.5" y="420" text-anchor="middle" class="t">扫码与选单</text>
+      <text x="131.5" y="442" text-anchor="middle" class="s">物料码/单号/库位码</text><text x="131.5" y="460" text-anchor="middle" class="s">一个入口统一识别</text><text x="131.5" y="478" text-anchor="middle" class="s">选单号逐行签收</text>
+    <rect x="215" y="396" width="143" height="96" rx="7" class="modn"/><rect x="316" y="403" width="36" height="16" rx="8" class="tag-n"/><text x="334" y="415" text-anchor="middle" class="tagn">新增</text>
+      <text x="286.5" y="420" text-anchor="middle" class="t">去向与转交</text>
+      <text x="286.5" y="442" text-anchor="middle" class="s">D01 出货单·D03 工位</text><text x="286.5" y="460" text-anchor="middle" class="s">D02 结论 30 天回填</text><text x="286.5" y="478" text-anchor="middle" class="s">外部受让待认领</text>
+    <rect x="370" y="396" width="143" height="96" rx="7" class="modn"/><rect x="471" y="403" width="36" height="16" rx="8" class="tag-n"/><text x="489" y="415" text-anchor="middle" class="tagn">新增</text>
+      <text x="441.5" y="420" text-anchor="middle" class="t">历史基线</text>
+      <text x="441.5" y="442" text-anchor="middle" class="s">旧台账导入·只读</text><text x="441.5" y="460" text-anchor="middle" class="s">按出库单回填项目</text><text x="441.5" y="478" text-anchor="middle" class="s">只查询·总量核对</text>
+    <rect x="525" y="396" width="143" height="96" rx="7" class="modn"/><rect x="626" y="403" width="36" height="16" rx="8" class="tag-n"/><text x="644" y="415" text-anchor="middle" class="tagn">新增</text>
+      <text x="596.5" y="420" text-anchor="middle" class="t">双轨抽查</text>
+      <text x="596.5" y="442" text-anchor="middle" class="s">每周抽 20 单比对旧表</text><text x="596.5" y="460" text-anchor="middle" class="s">记录一致率</text><text x="596.5" y="478" text-anchor="middle" class="s">连续两周 ≥95% 收口</text>
 
-    <path d="M365,432 V467" class="ln" marker-end="url(#ah)"/><text x="375" y="454" class="c">读写</text>
-    <rect x="40" y="470" width="317" height="64" rx="8" class="box"/><text x="198.5" y="494" text-anchor="middle" class="t">MySQL 8</text><text x="198.5" y="516" text-anchor="middle" class="s">申请、领用行、事件流水、单据镜像、差异池、待办</text>
-    <rect x="373" y="470" width="317" height="64" rx="8" class="box"/><text x="531.5" y="494" text-anchor="middle" class="t">照片目录</text><text x="531.5" y="516" text-anchor="middle" class="s">压缩约 300KB · 加水印 · 永久保存 · 每日备份</text>
+    <text x="60" y="522" class="s">原则：事件只增不改 · 结存由事件推算 · 改错用冲销 · 金蝶只读 · 历史基线不进台账 · 密钥只放 .env</text>
+
+    <path d="M365,544 V579" class="ln" marker-end="url(#ah)"/><text x="375" y="566" class="c">读写</text>
+    <rect x="40" y="582" width="317" height="64" rx="8" class="box"/><text x="198.5" y="606" text-anchor="middle" class="t">MySQL 8</text><text x="198.5" y="628" text-anchor="middle" class="s">申请、领用行、事件、单据镜像、差异池、历史基线、抽查</text>
+    <rect x="373" y="582" width="317" height="64" rx="8" class="box"/><text x="531.5" y="606" text-anchor="middle" class="t">照片目录</text><text x="531.5" y="628" text-anchor="middle" class="s">压缩约 300KB · 加水印 · 永久保存 · 每日备份</text>
 
     <text x="760" y="122" class="c">外部系统</text>
     <rect x="760" y="130" width="200" height="118" rx="8" class="erpb"/>
@@ -123,33 +160,72 @@ svg text{font-family:var(--f-body);fill:var(--fg)}
     <path d="M758,320 H693" class="ln" marker-end="url(#ah)"/><text x="725" y="313" text-anchor="middle" class="c">登录·通讯录</text>
     <path d="M692,396 H757" class="ln" marker-end="url(#ah)"/><text x="725" y="389" text-anchor="middle" class="c">推送</text>
 
-    <rect x="760" y="470" width="200" height="64" rx="8" class="none"/>
-      <text x="776" y="490" class="t" style="fill:var(--muted)">不对接</text>
-      <text x="776" y="509" class="s">仓储系统：本系统发 RM 码</text><text x="776" y="526" class="s">OA：审核在本系统内完成</text>
+    <rect x="760" y="466" width="200" height="86" rx="8" class="box"/>
+      <text x="776" y="488" class="t">旧台账 Excel</text><rect x="884" y="475" width="64" height="18" rx="9" class="tag-n"/><text x="916" y="488" text-anchor="middle" class="tagt">一次导入</text>
+      <text x="776" y="510" class="s">有效明细导入为历史基线</text><text x="776" y="528" class="s">第 3 月起转只读归档</text><text x="776" y="544" class="s">不作考核依据</text>
+    <path d="M758,509 H693" class="ln dash" marker-end="url(#ah)"/><text x="725" y="502" text-anchor="middle" class="c">导入</text>
 
-    <path d="M40,574 H80" class="ln" marker-end="url(#ah)"/><text x="88" y="578" class="s">已接入（代码完成，上线前联调）</text>
-    <path d="M280,574 H320" class="ln dash" marker-end="url(#ah)"/><text x="328" y="578" class="s">金蝶表单待确认，待接口化</text>
-    <rect x="500" y="566" width="16" height="16" rx="3" class="erpb"/><text x="522" y="578" class="s">金蝶记结果</text>
-    <rect x="610" y="566" width="16" height="16" rx="3" class="app"/><text x="632" y="578" class="s">中台记过程</text>
+    <rect x="760" y="582" width="200" height="64" rx="8" class="none"/>
+      <text x="776" y="602" class="t" style="fill:var(--muted)">不对接</text>
+      <text x="776" y="621" class="s">仓储系统：RM 码作一期行码</text><text x="776" y="638" class="s">OA：审核在本系统内完成</text>
+
+    <path d="M40,690 H80" class="ln" marker-end="url(#ah)"/><text x="88" y="694" class="s">已接入（上线前联调）</text>
+    <path d="M230,690 H270" class="ln dash" marker-end="url(#ah)"/><text x="278" y="694" class="s">待接口化 / 一次性导入</text>
+    <rect x="450" y="682" width="16" height="16" rx="3" class="erpb"/><text x="472" y="694" class="s">金蝶记结果</text>
+    <rect x="556" y="682" width="16" height="16" rx="3" class="app"/><text x="578" y="694" class="s">中台记过程</text>
+    <rect x="662" y="682" width="16" height="16" rx="3" class="modn"/><text x="684" y="694" class="s">v1.1 新增 / 改动</text>
   </svg>
   </div>
-  <p class="cap">外部系统有两个：金蝶（只读。物料已接 WebAPI；领料、退料、报废单和项目档案也由系统通过 WebAPI 自动拉取，金蝶表单确认后接入）和企业微信（确定使用：登录、工作台入口、通讯录、消息推送）。上线前两边分别联调；企微没配置时，系统自动退回账号密码登录。</p>
+  <p class="cap">外部系统不变：金蝶只读（物料已接 WebAPI；单据和项目档案表单确认后接入），企业微信确定使用。新增的旧台账 Excel 只导入一次，作为历史基线供查询和总量核对，不生成领用行、不参与对账与考核。</p>
 </section>
 
 <section>
   <h2>二、业务主流程</h2>
-  <div class="scroll"><svg id="flow" role="img" aria-label="业务主流程泳道图：从提需求到月度关账"></svg></div>
-  <p class="cap">图中只画主路径。领料专员在金蝶开单过账后，系统每 15 分钟拉取单据，按备注里的申请号匹配申请、自动生成领用行，使用人直接签收，不需要人工导入；匹配不上的由领料专员手工绑定。虚线表示自动拉取金蝶单据，金蝶表单确认后接入。并行运行的还有：定时任务每 15 分钟和每天巡检一次，把审核超时、超期（S5）、连续两周无动作冻结、差异超 48 小时等情况派成待办，按三级升级（本人 → 直属上级 → 月度经营会），同时推送企微应用消息（失败每 15 分钟补发，以站内待办为准）。紧急领用可以先签收、24 小时内补审核和 ERP 单；审核被驳回时退回申请人。</p>
+  <div class="scroll"><svg id="flow" role="img" aria-label="业务主流程泳道图：从提需求到月度关账，签收与使用两个节点为本次改动"></svg></div>
+  <p class="cap">图中只画主路径，绿色为本次改动的节点。签收有两条路，进同一套校验：扫码是主路径；标签破损、未赋码或批量交接时扫或输入 ERP 单据号，系统列出这张单上属于本人的行，逐行确认签收，没有“整单全选”。使用登记按去向卡附加要求：D01 必须填出货单号，D03 必须选产线工位，D02 送实验室后 30 天未回填结论进预警待办。转交的受让人不在通讯录时标“外部·待认领”，持有人和责任不变，由领料专员指派到账号后再走受让人确认。其余与 v1 相同：开单过账后系统自动拉单建行；定时任务巡检超时、超期、冻结、差异并按三级升级推送企微。</p>
 </section>
 
 <section>
-  <h2>三、对外边界</h2>
+  <h2>三、本次对齐改动</h2>
+  <div class="tbl"><table>
+    <thead><tr><th>依据</th><th>改动</th><th>落在哪里</th></tr></thead>
+    <tbody>
+      <tr><td class="src">蓝图 3.1 · 原型「扫码过账」</td><td><span class="chip">新增</span>扫码为主、选单为备。一个扫码入口识别物料码、ERP 单据号、库位码和申请号；单据号列出各行，逐行签收。已拆分替换（B4）的旧码直接提示“请扫新码”。</td><td class="where">后端 <code>/api/scan</code> · 扫码页（电脑 / 手机）</td></tr>
+      <tr><td class="src">蓝图 4.1 去向七类</td><td><span class="chip">新增</span>D01 项目成品必填出货单号；D03 产线试用必选产线工位；D02 可靠性实验回填结论，30 天未回填派预警待办，周报列出。</td><td class="where">lineops · jobs · 使用登记 · 物料详情</td></tr>
+      <tr><td class="src">蓝图 3.3 暂存与转交</td><td><span class="chip">新增</span>受让人不在通讯录时登记为“外部·待认领”，不改持有人；领料专员指派账号后由受让人确认；发起人可撤回待确认的转交。</td><td class="where">lineops · 物料详情 · 待办</td></tr>
+      <tr><td class="src">蓝图 5.2 旧表不迁移</td><td><span class="chip">新增</span>历史基线：旧台账 Excel 导入为只读基线；去向和位置按转换规则归一；缺项目号的按 ERP 出库单回查回填，补不到的挂“试制-未立项”；可按单号做总量核对。</td><td class="where">新表 history_line · 主数据 → 历史基线</td></tr>
+      <tr><td class="src">蓝图 表 5-1 双轨过渡</td><td><span class="chip">新增</span>双轨抽查：每周从新签收的行里抽 20 单与旧表比对，登记一致 / 不一致，算当周一致率，连续两周 ≥ 95% 时提示可进入收口。</td><td class="where">新表 parallel_check · 报表</td></tr>
+      <tr><td class="src">蓝图 表 5-3 · 5.3</td><td><span class="chip p">改动</span>验收六个数字同屏（三项门槛 + 三项观察）；字典季度复盘给出每个枚举的使用率，零使用或低于 1% 标“建议合并 / 停用”。</td><td class="where">看板 · 报表</td></tr>
+      <tr><td class="src">原型「总览看板」</td><td><span class="chip p">改动</span>补齐报废待批次处置、对账差异、今日登记三个数字，以及在制结存按项目、需要今天处理、最近流向事件三块。</td><td class="where">看板接口与页面</td></tr>
+      <tr><td class="src">原型「领用台账」</td><td><span class="chip p">改动</span>每行显示结存构成条（耗 / 损 / 退 / 废 / 存）。</td><td class="where">台账页</td></tr>
+      <tr><td class="src">原型「退库 / 报废」</td><td><span class="chip p">改动</span>退库分摊与报废批次合并为一个工作台，菜单只留一项。</td><td class="where">前端</td></tr>
+      <tr><td class="src">原型「ERP 对账」</td><td><span class="chip p">改动</span>差异池上方汇总已平 / 差异 / 差异率（目标 &lt; 2%）。</td><td class="where">对账接口与页面</td></tr>
+      <tr><td class="src">原型「字典与规则」</td><td><span class="chip p">改动</span>字典页展示旧台账 → 新系统转换规则，与历史基线导入用的是同一套。</td><td class="where">字典页</td></tr>
+      <tr><td class="src">原型手机端</td><td><span class="chip p">改动</span>首页加关键数字、待我处理的物料、最近登记；底部导航加“台账”。</td><td class="where">手机端</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section>
+  <h2>四、对外边界</h2>
   <ul class="bounds">
-    <li><b>金蝶只读。</b>中台不写金蝶，两边只用“单据号 + 行号 + 数量”对账。物料档案通过 WebAPI 每天增量同步（金蝶禁用的物料在中台停用、不删除）。领料 / 退料 / 报废单由系统每 15 分钟从金蝶拉取：领料单过账后，系统按备注里的申请号自动生成领用行，使用人直接签收，不需要人工导入；匹配不上的才由领料专员手工绑定。单据和项目档案的金蝶表单待确认后接入。</li>
-    <li><b>不对接仓储。</b>物料码由本系统发放（RM 开头），在电脑端用浏览器打印到标签打印机。待定：签收时就给每件打码，还是只给拆分出来的件打码。</li>
-    <li><b>确定使用企业微信。</b>手机端在企微工作台打开 H5，用网页授权免密登录；人员、职务和直属上级每天从企微通讯录同步；待办、升级和关账提醒推送企微应用消息，失败每 15 分钟补发、最多 3 次，以站内待办为准。差异认领、关账等操作在电脑端完成。OA 不接。</li>
-    <li><b>部署。</b>应用放内网（要访问金蝶内网地址），由 DMZ 的 HTTPS 反向代理以企业已备案域名对外，这个域名要在企微后台设为可信域名（即 RMLM_PUBLIC_URL）。服务器还要能出站访问企微接口 qyapi.weixin.qq.com，出口 IP 填进企微后台的企业可信 IP。金蝶、企微的密钥只写在服务器 .env 里。</li>
+    <li><b>金蝶只读。</b>中台不写金蝶，两边只用“单据号 + 行号 + 数量”对账。物料档案每天增量同步；领料 / 退料 / 报废单每 15 分钟拉取，领料单过账后按备注里的申请号自动生成领用行，使用人直接签收；匹配不上的由领料专员手工绑定。单据和项目档案的金蝶表单待确认后接入。</li>
+    <li><b>不对接仓储。</b>一期按蓝图“选单号 + 行码”跑通：本系统发的 RM 码就是行码，拆分时换新码、守恒校验照旧。物料码表已有层级和父子关系，仓储条码将来上线时写入物料码即可切换，不做二次开发。</li>
+    <li><b>旧台账一次导入。</b>只作历史基线，用于查询和总量核对，不生成领用行、不参与对账和验收指标；第 3 月起旧文件转只读归档。</li>
+    <li><b>确定使用企业微信。</b>手机端在企微工作台打开 H5，网页授权免密登录；人员和直属上级每天从通讯录同步；待办、升级和关账提醒推送应用消息，失败每 15 分钟补发、最多 3 次，以站内待办为准。OA 不接。</li>
+    <li><b>部署。</b>应用放内网（要访问金蝶内网地址），由 DMZ 的 HTTPS 反向代理以企业已备案域名对外（RMLM_PUBLIC_URL，需在企微后台设为可信域名），出口 IP 填进企微后台的企业可信 IP。密钥只写在服务器 .env。</li>
   </ul>
+</section>
+
+<section>
+  <h2>五、开发中按建议默认、请业务确认的口径</h2>
+  <ol class="ask">
+    <li>D02 可靠性实验的结论回填期限默认 30 天，超期派预警待办给持有人，并按现有机制 48 小时升级直属上级。</li>
+    <li>外部受让人由领料专员指派到系统账号（新人先开号或等企微通讯录同步）；指派前持有人和超期责任都不变。</li>
+    <li>历史基线：此前方案写的是“历史台账不导入、从零开始”，现按简版蓝图 5.2 改为“导入为只读基线”，仅查询和总量核对，不影响任何考核数字。</li>
+    <li>双轨抽查样本：每周从当周签收的行里随机抽 20 行（不足 20 行全抽），由领料专员对照旧表登记结果。</li>
+    <li>D01 出货单号先手填（不校验金蝶出货单），金蝶销售出库单表单确认后再接校验。</li>
+  </ol>
 </section>
 </div>
 
@@ -164,8 +240,8 @@ svg text{font-family:var(--f-body);fill:var(--fg)}
     n3:[2,1,"开领料单",["在金蝶开单","备注写申请号"]],
     n4:[4,1,"领料出库",["QTCK 过账"]],
     n5:[3,2,"自动生成领用行",["按申请号匹配","发 RM 码 · S0"]],
-    n6:[0,3,"本人签收",["不许代签","S1 在制未使用"]],
-    n7:[0,4,"使用与流转",["耗用·损耗·拆分","暂存·转交需确认"]],
+    n6:[0,3,"扫码/选单签收",["逐行确认","不许代签 · S1"],1],
+    n7:[0,4,"使用与流转",["去向附加校验","外部受让待认领"],1],
     n8:[0,5,"退库/报废登记",["登记即扣结存","S6 待开单"]],
     n9:[2,5,"开退料/报废单",["报废每周按箱","批次开单"]],
     n10:[4,5,"退料·报废出库",["QTRK·报废单"]],
@@ -198,7 +274,8 @@ svg text{font-family:var(--f-body);fill:var(--fg)}
     s+='<path d="'+d+'" class="ln'+(e[3]?' dash':'')+'" marker-end="url(#ah2)"/>';
   });
   Object.keys(N).forEach(function(id){
-    var n=N[id], p=bx(id), cls=n[0]===3?'n-sys':n[0]===4?'n-erp':'n-act', cx=p.x+BW/2;
+    var n=N[id], p=bx(id), cx=p.x+BW/2;
+    var cls=n[4]?'n-new':n[0]===3?'n-sys':n[0]===4?'n-erp':'n-act';
     s+='<rect x="'+p.x+'" y="'+p.y+'" width="'+BW+'" height="'+BH+'" rx="7" class="'+cls+'"/>';
     var ty=n[3].length>1?p.y+20:p.y+26;
     s+='<text x="'+cx+'" y="'+ty+'" text-anchor="middle" class="nt">'+n[2]+'</text>';
@@ -209,5 +286,3 @@ svg text{font-family:var(--f-body);fill:var(--fg)}
   svg.innerHTML=s;
 })();
 </script>
-
-</body></html>
