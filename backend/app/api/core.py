@@ -48,7 +48,7 @@ def auth_config():
 
 
 @router.get("/auth/wecom/url")
-def wecom_login_url(request: Request, next: str = "/m"):
+def wecom_login_url(request: Request, next: str = "/"):
     """企微内打开时，前端跳转到这个授权地址；授权后回到 /login?code=…"""
     return wecom.login_url(next, str(request.base_url))
 

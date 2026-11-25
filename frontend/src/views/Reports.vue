@@ -12,7 +12,8 @@
               <el-table-column prop="project" label="项目" width="120" />
               <el-table-column prop="holder" label="持有人" width="90" />
               <el-table-column label="结存" width="100"><template #default="{ row }">{{ row.balance }} {{ row.unit }}</template></el-table-column>
-              <el-table-column prop="due_date" label="归还日" width="110" />
+              <el-table-column v-if="k === 'lab_pending'" prop="sent_at" label="送实验时间" width="160" />
+              <el-table-column v-else prop="due_date" label="归还日" width="110" />
             </el-table>
             <el-table v-else :data="weekly.level3" size="small">
               <el-table-column prop="title" label="事项" />
@@ -66,8 +67,51 @@
           <div class="card"><h3>{{ quarterly.quarter }} 盘点抽样（每项目抽 20% 在制行，至少 1 行；差异不追责但须修正数据并记录原因）</h3>
             <el-table :data="quarterly.stocktake_sample" size="small"><el-table-column prop="project" label="项目" /><el-table-column prop="code" label="物料码" /><el-table-column prop="balance" label="系统结存" /><el-table-column label="实盘数量"><template #default>______</template></el-table-column></el-table>
           </div>
-          <div class="card"><h3>字典使用复盘（本季零使用或低于 1% 的枚举考虑合并 / 停用）</h3>
-            <el-table :data="usageRows" size="small"><el-table-column prop="code" label="编码" /><el-table-column prop="name" label="名称" /><el-table-column prop="n" label="使用次数" /></el-table>
+          <div class="card"><h3>字典使用复盘（整季零使用或使用率低于 1% 的枚举建议合并 / 停用，走字典变更）</h3>
+            <el-table :data="quarterly.dict_review" size="small">
+              <el-table-column label="字典" width="120"><template #default="{ row }">{{ DICT_NAMES[row.dict_type] }}</template></el-table-column>
+              <el-table-column prop="code" label="编码" width="80" /><el-table-column prop="name" label="名称" />
+              <el-table-column prop="count" label="本季使用" width="100" />
+              <el-table-column label="使用率" width="100"><template #default="{ row }">{{ row.pct ?? '—' }}{{ row.pct != null ? '%' : '' }}</template></el-table-column>
+              <el-table-column label="建议" width="130"><template #default="{ row }"><el-tag v-if="row.suggest" type="warning" size="small">建议合并 / 停用</el-tag></template></el-table-column>
+            </el-table>
+          </div>
+        </div>
+      </el-tab-pane>
+      <el-tab-pane v-if="hasRole('KEEPER','FINANCE','ADMIN','DEPT_HEAD','VP')" label="双轨抽查" name="parallel">
+        <div v-if="par">
+          <div class="page-head" style="margin-bottom: 10px">
+            <el-date-picker v-model="weekDate" type="week" format="YYYY [第] ww [周]" value-format="YYYY-MM-DD" @change="loadPar" />
+            <span class="sub">第 1 月并行期：每周从当周签收的行里抽 {{ par.summary.sample_size }} 单与旧表比对，连续两周一致率 ≥ {{ par.summary.target }}% 即可进入收口</span>
+            <span class="grow" />
+            <el-tag :type="par.summary.exit_ok ? 'success' : 'info'">{{ par.summary.exit_ok ? '已满足退出条件，可进入收口' : '未满足退出条件' }}</el-tag>
+            <el-button v-if="hasRole('KEEPER','ADMIN') && !par.rows.length" type="primary" @click="samplePar">抽取 {{ par.week }} 样本</el-button>
+          </div>
+          <div class="card"><h3>{{ par.week }} 样本（{{ par.rows.length }}）</h3>
+            <el-table :data="par.rows" size="small" empty-text="本周尚未抽样">
+              <el-table-column label="物料码" width="130"><template #default="{ row }"><router-link :to="`/line/${row.line_id}`" class="mono">{{ row.code }}</router-link></template></el-table-column>
+              <el-table-column label="物料"><template #default="{ row }">{{ row.material_code }} {{ row.material }}</template></el-table-column>
+              <el-table-column label="数量" width="90"><template #default="{ row }">{{ row.qty }} {{ row.unit }}</template></el-table-column>
+              <el-table-column prop="project" label="项目" width="110" />
+              <el-table-column prop="user" label="使用人" width="80" />
+              <el-table-column label="与旧表比对" width="300"><template #default="{ row }">
+                <template v-if="hasRole('KEEPER','ADMIN')">
+                  <el-radio-group v-model="row.result" size="small" @change="v => markPar(row, v)">
+                    <el-radio-button value="MATCH">一致</el-radio-button><el-radio-button value="DIFF">不一致</el-radio-button>
+                  </el-radio-group>
+                  <span v-if="row.note" class="muted" style="margin-left: 6px">{{ row.note }}</span>
+                </template>
+                <span v-else>{{ { MATCH: '一致', DIFF: '不一致' }[row.result] || '未比对' }} {{ row.note || '' }}</span>
+              </template></el-table-column>
+            </el-table>
+          </div>
+          <div class="card"><h3>各周一致率</h3>
+            <el-table :data="par.summary.weeks" size="small">
+              <el-table-column prop="week" label="周" width="110" /><el-table-column prop="sampled" label="样本" width="80" />
+              <el-table-column prop="checked" label="已比对" width="80" /><el-table-column prop="match" label="一致" width="80" />
+              <el-table-column label="一致率" width="100"><template #default="{ row }"><b :style="{ color: row.rate == null ? '' : row.pass ? '#1c7f47' : '#c0392b' }">{{ row.rate ?? '—' }}{{ row.rate != null ? '%' : '' }}</b></template></el-table-column>
+              <el-table-column label="状态"><template #default="{ row }">{{ !row.done ? '比对中' : row.pass ? '达标' : '未达标' }}</template></el-table-column>
+            </el-table>
           </div>
         </div>
       </el-tab-pane>
@@ -76,12 +120,13 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { onMounted, ref } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
-import { hasRole, store } from '../store'
+import { hasRole } from '../store'
 import { fmtMoney } from '../utils'
 
-const W = { overdue: '超期未结案', urgent: '紧急领用超 24 小时未补', hold_30d: '暂存超 30 天', doc_pending: '待单据处置', level3: '三级挂账（提交月度经营会）' }
+const W = { overdue: '超期未结案', urgent: '紧急领用超 24 小时未补', hold_30d: '暂存超 30 天', doc_pending: '待单据处置', lab_pending: 'D02 实验结论超 30 天未回填', level3: '三级挂账（提交月度经营会）' }
 const tab = ref('weekly')
 const weekly = ref(null)
 const projects = ref([])
@@ -90,18 +135,37 @@ const monthly = ref(null)
 const quarterly = ref(null)
 const d = new Date(); d.setMonth(d.getMonth() - 1)
 const period = ref(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`)
-const usageRows = computed(() => {
-  if (!quarterly.value) return []
-  const out = []
-  for (const t of ['DEST', 'REASON', 'LOSS_REASON', 'SCRAP_REASON']) for (const it of store.dicts[t] || []) out.push({ code: it.code, name: it.name, n: quarterly.value.dict_usage[it.code] || 0 })
-  return out.sort((a, b) => a.n - b.n)
-})
+const DICT_NAMES = { DEST: '去向', REASON: '领料原因', LOSS_REASON: '损耗原因', SCRAP_REASON: '报废原因', RECON_REASON: '差异原因码' }
+const par = ref(null)
+const weekDate = ref(null)
+function isoWeek(dateStr) {
+  const d = dateStr ? new Date(dateStr) : new Date()
+  const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()))
+  const day = t.getUTCDay() || 7
+  t.setUTCDate(t.getUTCDate() + 4 - day)
+  const y = t.getUTCFullYear()
+  const w = Math.ceil(((t - Date.UTC(y, 0, 1)) / 86400000 + 1) / 7)
+  return `${y}-W${String(w).padStart(2, '0')}`
+}
+async function loadPar() { par.value = await api.get(`/api/parallel?week=${isoWeek(weekDate.value)}`) }
+async function samplePar() { par.value = await api.post(`/api/parallel/sample?week=${par.value.week}`); ElMessage.success(`已抽取 ${par.value.rows.length} 单`) }
+async function markPar(row, v) {
+  let note = null
+  if (v === 'DIFF') {
+    try { note = (await ElMessageBox.prompt('写明与旧表差在哪里（数量、项目、持有人等）', '不一致')).value } catch { row.result = null; return }
+  }
+  try {
+    Object.assign(row, await api.post(`/api/parallel/${row.id}`, { result: v, note }))
+  } catch { row.result = null; return }
+  par.value.summary = (await api.get(`/api/parallel?week=${par.value.week}`)).summary
+}
 async function load() {
   if (tab.value === 'weekly') weekly.value = await api.get('/api/reports/weekly')
   if (tab.value === 'projects') projects.value = await api.get('/api/reports/projects')
   if (tab.value === 'loss') loss.value = await api.get('/api/reports/loss')
   if (tab.value === 'monthly') monthly.value = await api.get(`/api/reports/monthly?period=${period.value}`)
   if (tab.value === 'quarterly') quarterly.value = await api.get('/api/reports/quarterly')
+  if (tab.value === 'parallel') await loadPar()
 }
 onMounted(load)
 </script>

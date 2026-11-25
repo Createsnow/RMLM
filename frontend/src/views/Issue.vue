@@ -1,6 +1,19 @@
 <template>
   <div>
     <div class="page-head"><h2>开单绑定</h2><span class="sub">在金蝶开领料单时请在备注里写中台申请号，系统自动匹配；匹配不上再手工绑定（一物一行）</span></div>
+    <div class="card" v-if="ext.length">
+      <h3>外部受让待认领（{{ ext.length }}）<span class="muted">受让人不在通讯录；指派到系统账号后由受让人确认，确认前持有人不变</span></h3>
+      <el-table :data="ext" size="small">
+        <el-table-column label="物料" min-width="160"><template #default="{ row }"><router-link :to="`/line/${row.line.id}`" class="mono">{{ row.line.code }}</router-link> {{ row.line.material }}<div class="muted">结存 {{ row.line.balance }} {{ row.line.unit }} · 持有人 {{ row.line.holder }}</div></template></el-table-column>
+        <el-table-column prop="external" label="外部受让人" width="160" />
+        <el-table-column prop="reason" label="原因" />
+        <el-table-column prop="created_at" label="登记时间" width="160" />
+        <el-table-column label="指派到账号" width="290"><template #default="{ row }">
+          <div style="display: flex; gap: 6px"><RemoteSelect v-model="assign[row.event_id]" kind="user" :exclude="[row.line.holder_id]" />
+          <el-button size="small" type="primary" :disabled="!assign[row.event_id]" @click="doAssign(row)">指派</el-button></div>
+        </template></el-table-column>
+      </el-table>
+    </div>
     <div class="card" v-if="sug.length">
       <h3>自动匹配建议（{{ sug.length }}）</h3>
       <el-table :data="sug" size="small">
@@ -45,11 +58,14 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
+import RemoteSelect from '../components/RemoteSelect.vue'
 
 const reqs = ref([])
+const ext = ref([])
+const assign = reactive({})
 const sug = ref([])
 const docs = ref([])
 const dlg = ref(false)
@@ -60,7 +76,14 @@ const needsBind = x => x.req.status === 'APPROVED' ? !x.it.lines.some(l => l.erp
 const candidates = computed(() => !cur.value ? [] : docs.value.flatMap(d => d.lines.filter(l => !l.bound_line && l.material_code === cur.value.it.material_code)
   .map(l => ({ ...l, doc_no: d.no, posted: d.posted }))))
 
+async function doAssign(row) {
+  await api.post(`/api/transfers/${row.event_id}/assign?to_user_id=${assign[row.event_id]}`)
+  ElMessage.success('已指派，等待受让人确认')
+  delete assign[row.event_id]
+  ext.value = await api.get('/api/transfers/external')
+}
 async function load() {
+  ext.value = await api.get('/api/transfers/external')
   reqs.value = await api.get('/api/requisitions?scope=issue')
   sug.value = await api.get('/api/erp/suggestions')
   docs.value = [...await api.get('/api/erp/docs?doc_type=LL'), ...await api.get('/api/erp/docs?doc_type=AB')]

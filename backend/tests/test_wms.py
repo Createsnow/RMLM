@@ -223,3 +223,16 @@ def test_upgrade_schema_relaxes_unique_and_widens_codes(org):
     # 其他唯一索引保留
     assert any(i["unique"] and i["column_names"] == ["code"] for i in insp.get_indexes("ledger_line"))
     upgrade_schema()
+
+
+def test_unified_scan_finds_pending_line_for_wms_barcode(org, ref, fake):
+    line = issue(org, ref, qty=30, sign=False)
+    fake.add("WMS-U", "M-CABLE", 30, out_doc_no=line["_doc"]["no"])
+    res = org.ok(org.get("a1", "/api/scan/WMS-U"))
+    assert res["kind"] == "wms" and res["wms"]["qty"] == "30"
+    assert [c["id"] for c in res["candidates"]] == [line["id"]]
+    assert res["candidates"][0]["action"] == "sign" and res["candidates"][0]["qty_match"]
+    # 单据号仍按单据识别，不去调仓储
+    calls = len(fake.calls)
+    assert org.ok(org.get("a1", f"/api/scan/{line['_doc']['no']}"))["kind"] == "doc"
+    assert len(fake.calls) == calls

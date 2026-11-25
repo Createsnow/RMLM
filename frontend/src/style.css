@@ -32,3 +32,17 @@ a { color: var(--brand); text-decoration: none; }
   .card { padding: 12px; border-radius: 8px; }
   .page-head h2 { font-size: 17px; }
 }
+
+/* v1.1 原型：结存构成条（耗 / 损 / 退 / 废 / 存） */
+.bar { display: flex; height: 8px; border-radius: 4px; overflow: hidden; background: #eef1f5; min-width: 80px; }
+.bar i { display: block; height: 100%; }
+.bar .u { background: #7aa7e0; } .bar .l { background: #e0b25e; } .bar .r { background: #5fb38a; }
+.bar .s { background: #d9776b; } .bar .b { background: var(--brand); }
+.bar-legend { display: flex; gap: 10px; flex-wrap: wrap; font-size: 11.5px; color: var(--ink2); }
+.bar-legend i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 3px; vertical-align: -1px; }
+.kpi.b .v { color: var(--brand); } .kpi.a .v { color: #b46a00; } .kpi.p .v { color: #5b4bc4; } .kpi.g .v { color: #1c7f47; }
+.hbar { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; font-size: 12.5px; }
+.hbar .k { width: 110px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hbar .track { flex: 1; background: #eef1f5; border-radius: 4px; height: 14px; overflow: hidden; }
+.hbar .fill { height: 100%; background: linear-gradient(90deg, #1f8fff, #0b5cb8); border-radius: 4px; }
+.hbar .n { width: 54px; text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }

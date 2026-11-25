@@ -68,13 +68,14 @@ const menu = computed(() => {
   const ops = []
   if (hasRole('KEEPER')) ops.push({ path: '/issue', name: '开单绑定', icon: 'Link' })
   if (hasRole('KEEPER', 'FINANCE', 'WAREHOUSE', 'ADMIN')) ops.push({ path: '/erp', name: 'ERP 单据', icon: 'Files' })
-  if (hasRole('KEEPER', 'WAREHOUSE', 'ADMIN')) ops.push({ path: '/returns', name: '退库分摊', icon: 'Back' }, { path: '/scrap', name: '报废批次', icon: 'Delete' })
+  if (hasRole('KEEPER', 'WAREHOUSE', 'ADMIN')) ops.push({ path: '/dispose', name: '退库 / 报废', icon: 'Back' })
   if (hasRole('KEEPER', 'FINANCE', 'ADMIN', 'DEPT_HEAD', 'VP')) ops.push({ path: '/recon', name: '对账与关账', icon: 'Money' })
   if (hasRole('KEEPER', 'ADMIN', 'FINANCE')) ops.push({ path: '/reversals', name: '冲销', icon: 'RefreshLeft' })
   if (ops.length) groups.push({ title: '物料作业', items: ops })
   const mg = [{ path: '/reports', name: '报表', icon: 'TrendCharts' }]
   if (hasRole('KEEPER', 'ADMIN', 'WAREHOUSE')) mg.push({ path: '/master', name: '主数据', icon: 'Box' })
-  mg.push({ path: '/dicts', name: '字典', icon: 'Collection' })
+  if (hasRole('KEEPER', 'ADMIN', 'FINANCE', 'DEPT_HEAD', 'VP', 'WAREHOUSE')) mg.push({ path: '/history', name: '历史基线', icon: 'Clock' })
+  mg.push({ path: '/dicts', name: '字典与规则', icon: 'Collection' })
   if (hasRole('ADMIN')) mg.push({ path: '/users', name: '账号管理', icon: 'UserFilled' }, { path: '/audit', name: '审计日志', icon: 'View' })
   groups.push({ title: '管理', items: mg })
   return groups

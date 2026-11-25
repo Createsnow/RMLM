@@ -111,6 +111,10 @@ def line_out(db: Session, line: LedgerLine, viewer: User, c=None, full: bool = F
         flags.append("待开单")
     if line.locked:
         flags.append("锁定")
+    if any(e.etype == "TRANSFER_REQ" and e.status == "PENDING" and not e.to_user_id for e in c.events):
+        flags.append("外部·待认领")
+    wms_bound = db.scalar(select(MaterialCode.id).where(MaterialCode.code == line.code,
+                                                        MaterialCode.source == "WMS")) is not None
     d = {
         "id": line.id, "code": line.code, "level": line.level, "parent_id": line.parent_id, "root_id": line.root_id,
         "material_id": m.id, "material_code": m.code, "material": m.name, "spec": m.spec, "unit": m.unit,
@@ -123,7 +127,8 @@ def line_out(db: Session, line: LedgerLine, viewer: User, c=None, full: bool = F
         "consumed": s(c.consumed), "loss": s(c.loss), "split_out": s(c.split_out), "returned": s(c.returned),
         "scrapped": s(c.scrapped), "balance": s(c.balance), "balance_amount": str((max(c.balance, D(0)) * price).quantize(Decimal("0.01"))),
         "return_pending": s(c.return_pending), "scrap_pending": s(c.scrap_pending), "created_at": s(line.created_at),
-        "voided": line.voided,
+        "voided": line.voided, "wms_bound": wms_bound,
+        "code_kind": "WMS" if wms_bound else ("LINE" if line.code.startswith("LN") else "RM"),
     }
     if line.erp_line_id or line.root_id:
         root = db.get(LedgerLine, line.root_id or line.id)
@@ -154,20 +159,33 @@ def line_out(db: Session, line: LedgerLine, viewer: User, c=None, full: bool = F
     } for e in c.events]
     codes = list(db.scalars(select(MaterialCode).where(MaterialCode.line_id == line.id).order_by(MaterialCode.id)))
     d["codes"] = [{"code": k.code, "layer": k.layer, "parent_code": k.parent_code, "qty_init": s(k.qty_init),
-                   "state": ledger.code_state(k, line, c), "replaced_at": s(k.replaced_at)} for k in codes]
+                   "state": ledger.code_state(k, line, c), "replaced_at": s(k.replaced_at),
+                   "source": k.source} for k in codes]
     d["children"] = [{"id": k.id, "code": k.code, "qty": s(k.qty), "voided": k.voided}
                      for k in db.scalars(select(LedgerLine).where(LedgerLine.parent_id == line.id))]
     can = _can_operate(db, viewer, line) and not line.locked and not line.voided
     active = line.signed and c.balance > 0
     pending_transfer = next((e for e in c.events if e.etype == "TRANSFER_REQ" and e.status == "PENDING"), None)
-    d["pending_transfer"] = {"id": pending_transfer.id, "to_user": uname(pending_transfer.to_user_id)} if pending_transfer else None
+    d["pending_transfer"] = {
+        "id": pending_transfer.id, "to_user": uname(pending_transfer.to_user_id),
+        "external": (pending_transfer.extra or {}).get("external"), "reason": pending_transfer.reason,
+        "operator_id": pending_transfer.operator_id,
+    } if pending_transfer else None
+    # D02 可靠性实验：未回填结论的耗用事件
+    concluded = {(e.extra or {}).get("for") for e in c.events if e.etype == "CONCLUSION"}
+    d["lab_pending"] = [e.id for e in ledger.effective(c.events)
+                        if e.etype == "CONSUME" and e.dest == "D02" and not e.is_loss and e.id not in concluded]
     d["actions"] = {
         "sign": (not line.signed) and viewer.id == line.holder_id and not line.locked,
         "sign_needs_codes": (not line.signed) and settings.wms_enabled,
         "consume": can and active, "split": can and active, "return": can and active, "scrap": can and active,
         "hold": can and active and st not in ("S3", "S5"), "move": can and st == "S3",
         "transfer": can and active and pending_transfer is None,
-        "confirm_transfer": bool(pending_transfer and pending_transfer.to_user_id == viewer.id),
+        "confirm_transfer": bool(pending_transfer and pending_transfer.to_user_id
+                                 and pending_transfer.to_user_id == viewer.id),
+        "cancel_transfer": bool(pending_transfer and viewer.id in (pending_transfer.operator_id, line.holder_id)),
+        "assign_transfer": bool(pending_transfer and not pending_transfer.to_user_id and has_role(viewer, "KEEPER")),
+        "conclusion": can or viewer.id == line.holder_id,
         "qconfirm": can and active and line.long_cycle,
         "renew": can and active and line.long_cycle,
         "due_change": can and active,

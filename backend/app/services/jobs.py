@@ -109,8 +109,20 @@ def quarter_hour(db: Session) -> dict:
 # ------------------------------------------------------------------ 每天
 def daily(db: Session) -> dict:
     now, today = clock.now(), clock.today()
-    stats = {"recon": recon.run(db), "overdue": 0, "frozen": 0, "renew": 0, "lapsed": 0, "project": 0,
+    stats = {"recon": recon.run(db), "overdue": 0, "frozen": 0, "renew": 0, "lapsed": 0, "project": 0, "lab": 0,
              "material_sync": master_sync.daily_sync(db), "contact_sync": wecom.daily_sync(db)}
+    # D02 可靠性实验：送实验室超过 30 天未回填结论 → 预警待办（48 小时未处理按通用规则升级直属上级）
+    from .lineops import LAB_CONCLUSION_DAYS, lab_pending
+
+    for e in lab_pending(db):
+        if e.created_at < now - timedelta(days=LAB_CONCLUSION_DAYS):
+            line = db.get(LedgerLine, e.line_id)
+            if line.voided:
+                continue
+            if add_todo(db, line.holder_id, "LAB_CONCLUSION",
+                        f"{line.code} 送可靠性实验已超 {LAB_CONCLUSION_DAYS} 天未回填结论，请补填", "line", line.id,
+                        dedupe=True):
+                stats["lab"] += 1
     lines = list(db.scalars(select(LedgerLine).where(LedgerLine.signed.is_(True), LedgerLine.voided.is_(False))))
     calcs = ledger.load(db, lines)
     for line in lines:

@@ -2,14 +2,14 @@
   <div>
     <div class="page-head">
       <h2>领用台账</h2>
-      <span class="sub">一行 = 一份物料的全生命周期</span>
+      <span class="sub">一行 = 一份物料的全生命周期，点任意行看详情与事件流水</span>
       <span class="grow" />
       <el-input v-model="q" placeholder="物料码 / 物料名称" clearable style="width: 200px" @change="load" />
       <el-select v-model="scope" style="width: 130px" @change="load">
         <el-option value="visible" label="可见范围" />
         <el-option value="mine" label="我持有的" />
       </el-select>
-      <el-button @click="printSel" :disabled="!sel.length"><el-icon><Printer /></el-icon>打印标签</el-button>
+      <el-button @click="$router.push('/scan')"><el-icon><Camera /></el-icon>扫码登记</el-button>
     </div>
     <el-radio-group v-model="status" size="small" style="margin-bottom: 12px" @change="load">
       <el-radio-button value="">全部</el-radio-button>
@@ -21,13 +21,15 @@
       <el-radio-button value="S7">已结案</el-radio-button>
     </el-radio-group>
     <div class="card" style="padding: 0">
-      <el-table :data="rows" @selection-change="v => (sel = v)" @row-click="r => $router.push(`/line/${r.id}`)" style="cursor: pointer">
-        <el-table-column type="selection" width="40" />
-        <el-table-column label="物料码" width="130"><template #default="{ row }"><span class="mono">{{ row.code }}</span><div v-if="row.level === 2" class="muted">子行</div></template></el-table-column>
+      <el-table :data="rows" @row-click="r => $router.push(`/line/${r.id}`)" style="cursor: pointer">
+        <el-table-column label="物料码" width="140"><template #default="{ row }"><span class="mono">{{ row.code }}</span><div v-if="row.level === 2" class="muted">子行</div><div v-else-if="!row.signed && row.code.startsWith('LN')" class="muted">行号，签收时扫仓储条码</div></template></el-table-column>
         <el-table-column label="物料" min-width="160"><template #default="{ row }">{{ row.material }}<div class="muted">{{ row.material_code }} {{ row.spec }}</div></template></el-table-column>
         <el-table-column label="项目" width="120"><template #default="{ row }">{{ row.project }}<div class="muted">客户 {{ row.customer_code || '—' }}</div></template></el-table-column>
         <el-table-column label="领用" width="90" align="right"><template #default="{ row }">{{ row.qty }} {{ row.unit }}</template></el-table-column>
-        <el-table-column label="耗 / 损 / 退 / 废" width="140"><template #default="{ row }"><span class="muted num">{{ row.consumed }} / {{ row.loss }} / {{ row.returned }} / {{ row.scrapped }}</span></template></el-table-column>
+        <el-table-column label="结存构成" width="150"><template #default="{ row }">
+          <BalanceBar :line="row" />
+          <div class="muted num" style="margin-top: 3px">耗 {{ row.consumed }} / 损 {{ row.loss }} / 退 {{ row.returned }} / 废 {{ row.scrapped }}</div>
+        </template></el-table-column>
         <el-table-column label="结存" width="100" align="right"><template #default="{ row }"><b class="num">{{ row.balance }}</b></template></el-table-column>
         <el-table-column label="结存金额" width="100" align="right"><template #default="{ row }">{{ fmtMoney(row.balance_amount) }}</template></el-table-column>
         <el-table-column prop="holder" label="持有人" width="90" />
@@ -43,19 +45,16 @@
 
 <script setup>
 import { onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
 import { api } from '../api'
 import { STATUS_TYPE, fmtMoney } from '../utils'
+import BalanceBar from '../components/BalanceBar.vue'
 
-const router = useRouter()
 const rows = ref([])
-const sel = ref([])
 const q = ref('')
 const scope = ref('visible')
 const status = ref('active')
 async function load() {
   rows.value = await api.get(`/api/lines?scope=${scope.value}&status=${status.value}&q=${encodeURIComponent(q.value)}`)
 }
-function printSel() { router.push(`/labels?ids=${sel.value.map(r => r.id).join(',')}`) }
 onMounted(load)
 </script>

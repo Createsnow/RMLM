@@ -78,7 +78,7 @@ def main() -> None:
                                         "remark": req.no, "lines": [{"material_code": mcode, "qty": qty}]})
         line = erp.bind(db, keeper, req.items[0].id, doc.lines[0].id)
         if sign:
-            lineops.sign(db, line, user, photo(user))
+            lineops.sign(db, line, user, photo(user))  # 演示环境不接仓储，使用 RM 临时码
         return req, line
 
     def photo(u):
@@ -90,7 +90,7 @@ def main() -> None:
     _, l2 = flow(eng1, lead, "PDJ20251101", "1231346", 6)
     lineops.transfer_request(db, l2, eng1, tester.id, "交实验室做可靠性测试")
     _, l3 = flow(eng2, lead, "RD202519", "1000454", 45, days=1)
-    lineops.consume(db, l3, eng2, 20, "D01", False, None, "12PCS 测试线制作完成", photo(eng2))
+    lineops.consume(db, l3, eng2, 20, "D01", False, None, "12PCS 测试线制作完成", photo(eng2), ship_no="XSCK-2601-0032")
     flow(eng2, lead, "PRC20251209", "F9132074", 2, sign=False)
     flow(eng1, lead, "RD202519", "1000454", 10, approve=False, remark="待审核的演示申请")
     flow(tester, lab, "试制-1300", "1231346", 4, long_cycle=True, long_cycle_months=6, days=150, reason="R03",

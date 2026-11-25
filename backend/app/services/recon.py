@@ -165,3 +165,20 @@ def close_period(db: Session, op: User, period: str) -> PeriodClose:
     db.add(pc)
     close_todos(db, "period", int(period.replace("-", "")))
     return pc
+
+
+def summary(db: Session, period: str = "") -> dict:
+    """原型「ERP 对账中心」汇总：已平单据 / 差异单据 / 差异率（目标 < 2%）。"""
+    docs = [d for d in db.scalars(select(ErpDoc).where(ErpDoc.doc_type != "TZ", ErpDoc.posted.is_(True)))
+            if not period or period_of(d.doc_date) == period]
+    nos = {d.no for d in docs}
+    q = select(ReconDiff).where(ReconDiff.diff != 0, ReconDiff.state != "RESOLVED")
+    if period:
+        q = q.where(ReconDiff.period == period)
+    open_diffs = list(db.scalars(q))
+    diff_docs = {d.erp_doc_no for d in open_diffs if d.erp_doc_no in nos}
+    no_doc = sum(1 for d in open_diffs if not d.erp_doc_no)
+    total = len(nos)
+    return {"period": period or None, "docs": total, "balanced": total - len(diff_docs), "diff_docs": len(diff_docs),
+            "no_doc_diffs": no_doc, "open_diffs": len(open_diffs),
+            "diff_rate": round(len(diff_docs) / total * 100, 1) if total else None, "target": 2}

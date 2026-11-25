@@ -1,7 +1,7 @@
 <template>
   <div>
     <div class="page-head">
-      <h2>报废批次</h2><span class="sub">整件报废先贴标入箱，每周按箱号生成批次清单，统一开金蝶报废单核销；残料不走此流程</span>
+      <h2 v-if="!embedded">报废批次</h2><span class="sub">整件报废先贴标入箱，每周按箱号生成批次清单，统一开金蝶报废单核销；残料不走此流程</span>
       <span class="grow" />
       <el-button v-if="hasRole('KEEPER')" type="primary" @click="build">生成本周批次</el-button>
     </div>
@@ -40,6 +40,7 @@
 </template>
 
 <script setup>
+defineProps({ embedded: Boolean })
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { api } from '../api'

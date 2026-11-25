@@ -307,6 +307,12 @@ class ConsumeIn(PhotoIn):
     dest: str | None = None
     is_loss: bool = False
     loss_reason: str | None = None
+    ship_no: str | None = None  # D01 出货单号
+    location_id: int | None = None  # D03 产线工位
+
+
+class SignIn(PhotoIn):
+    codes: list[str] = []  # 已接仓储时：扫到的仓储条码（一个码一条领用行）
 
 
 class SplitIn(PhotoIn):
@@ -320,8 +326,9 @@ class LocIn(PhotoIn):
 
 
 class TransferIn(BaseModel):
-    to_user_id: int
+    to_user_id: int | None = None
     reason: str
+    external_name: str | None = None  # 受让人不在通讯录：外部 / 待认领
 
 
 class QtyIn(PhotoIn):
@@ -354,10 +361,6 @@ def _done(db: Session, user: User, line: LedgerLine, extra: dict | None = None) 
     return d
 
 
-class SignIn(PhotoIn):
-    codes: list[str] = []  # 已接仓储时：扫到的仓储条码（一个码一条领用行）
-
-
 @router.post("/lines/{lid}/sign")
 def sign(lid: int, body: SignIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
     line = _line(db, user, lid)
@@ -387,7 +390,7 @@ def wms_barcode(code: str, user: User = Depends(current_user), db: Session = Dep
 def consume(lid: int, body: ConsumeIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
     line = _line(db, user, lid)
     lineops.consume(db, line, user, body.qty, body.dest, body.is_loss, body.loss_reason, body.note,
-                    check_photos(db, body.photos))
+                    check_photos(db, body.photos), ship_no=body.ship_no, location_id=body.location_id)
     return _done(db, user, line)
 
 
@@ -416,8 +419,56 @@ def move(lid: int, body: LocIn, user: User = Depends(current_user), db: Session 
 @router.post("/lines/{lid}/transfer")
 def transfer(lid: int, body: TransferIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
     line = _line(db, user, lid)
-    lineops.transfer_request(db, line, user, body.to_user_id, body.reason)
+    lineops.transfer_request(db, line, user, body.to_user_id, body.reason, body.external_name)
     return _done(db, user, line)
+
+
+@router.post("/transfers/{eid}/assign")
+def transfer_assign(eid: int, to_user_id: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    ev = get_or_404(db, Event, eid, "转交")
+    lineops.transfer_assign(db, ev, user, to_user_id)
+    return _done(db, user, db.get(LedgerLine, ev.line_id))
+
+
+@router.post("/transfers/{eid}/cancel")
+def transfer_cancel(eid: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    ev = get_or_404(db, Event, eid, "转交")
+    lineops.transfer_cancel(db, ev, user)
+    return _done(db, user, db.get(LedgerLine, ev.line_id))
+
+
+@router.get("/transfers/external")
+def external_transfers(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """待认领的外部转交（领料专员处理）。"""
+    require_role(user, "KEEPER", "ADMIN")
+    out = []
+    for e in db.scalars(select(Event).where(Event.etype == "TRANSFER_REQ", Event.status == "PENDING",
+                                            Event.to_user_id.is_(None)).order_by(Event.id)):
+        line = db.get(LedgerLine, e.line_id)
+        d = line_out(db, line, user)
+        out.append({"event_id": e.id, "external": (e.extra or {}).get("external"), "reason": e.reason,
+                    "created_at": s(e.created_at), "line": d})
+    return out
+
+
+class ConclusionIn(PhotoIn):
+    text: str
+
+
+@router.post("/events/{eid}/conclusion")
+def conclusion(eid: int, body: ConclusionIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    ev = get_or_404(db, Event, eid, "事件")
+    line = _line(db, user, ev.line_id)
+    lineops.conclusion(db, ev, user, body.text, check_photos(db, body.photos) if body.photos else None)
+    return _done(db, user, line)
+
+
+# ================================================================== 扫码统一识别
+@router.get("/scan/{code:path}")
+def scan(code: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    from ..services import scan as scansvc
+
+    return scansvc.resolve(db, user, code)
 
 
 @router.post("/transfers/{eid}/decide")
@@ -629,6 +680,12 @@ def resolve(did: int, body: ResolveIn, user: User = Depends(current_user), db: S
     return {"ok": True, "state": d.state}
 
 
+@router.get("/recon/summary")
+def recon_summary(period: str = "", user: User = Depends(current_user), db: Session = Depends(get_db)):
+    require_role(user, "KEEPER", "FINANCE", "ADMIN", "DEPT_HEAD", "VP")
+    return recon.summary(db, period)
+
+
 @router.get("/recon/periods")
 def periods(user: User = Depends(current_user), db: Session = Depends(get_db)):
     rows = {p.period: p for p in db.scalars(select(PeriodClose))}
@@ -685,3 +742,70 @@ def monthly(period: str, user: User = Depends(current_user), db: Session = Depen
 @router.get("/reports/quarterly")
 def quarterly(user: User = Depends(current_user), db: Session = Depends(get_db)):
     return reports.quarterly_lists(db, user)
+
+
+# ================================================================== 历史基线（只读）
+@router.get("/history")
+def history_list(q: str = "", project: str = "", dest: str = "", batch: str = "",
+                 user: User = Depends(current_user), db: Session = Depends(get_db)):
+    from ..services import history
+
+    require_role(user, "KEEPER", "ADMIN", "FINANCE", "DEPT_HEAD", "VP", "WAREHOUSE")
+    return history.query(db, q, project, dest, batch)
+
+
+@router.get("/history/rules")
+def history_rules(user: User = Depends(current_user)):
+    from ..services import history
+
+    return {"rules": history.rules(), "columns": history.COLUMNS, "virtual_project": history.VIRTUAL_PROJECT}
+
+
+@router.post("/history/import")
+def history_import(file: UploadFile = File(...), user: User = Depends(current_user), db: Session = Depends(get_db)):
+    from ..services import history
+
+    return history.import_xlsx(db, user, file.file)
+
+
+@router.get("/history/check")
+def history_check(batch: str = "", user: User = Depends(current_user), db: Session = Depends(get_db)):
+    from ..services import history
+
+    require_role(user, "KEEPER", "ADMIN", "FINANCE", "DEPT_HEAD", "VP", "WAREHOUSE")
+    return history.check(db, batch)
+
+
+# ================================================================== 双轨抽查
+@router.get("/parallel")
+def parallel_list(week: str = "", user: User = Depends(current_user), db: Session = Depends(get_db)):
+    from ..models import ParallelCheck
+    from ..services import parallel
+
+    require_role(user, "KEEPER", "ADMIN", "FINANCE", "DEPT_HEAD", "VP")
+    week = week or parallel.week_of(clock.today())
+    rows = list(db.scalars(select(ParallelCheck).where(ParallelCheck.week == week).order_by(ParallelCheck.id)))
+    return {"week": week, "rows": parallel.rows_out(db, rows), "summary": parallel.summary(db)}
+
+
+@router.post("/parallel/sample")
+def parallel_sample(week: str = "", user: User = Depends(current_user), db: Session = Depends(get_db)):
+    from ..services import parallel
+
+    week = week or parallel.week_of(clock.today())
+    rows = parallel.sample(db, user, week)
+    return {"week": week, "rows": parallel.rows_out(db, rows), "summary": parallel.summary(db)}
+
+
+class ParallelIn(BaseModel):
+    result: str
+    note: str | None = None
+
+
+@router.post("/parallel/{pid}")
+def parallel_mark(pid: int, body: ParallelIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    from ..models import ParallelCheck
+    from ..services import parallel
+
+    pc = parallel.mark(db, user, get_or_404(db, ParallelCheck, pid, "抽查记录"), body.result, body.note)
+    return parallel.rows_out(db, [pc])[0]

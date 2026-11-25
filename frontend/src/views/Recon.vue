@@ -6,6 +6,11 @@
       <span class="grow" />
       <el-button @click="run"><el-icon><Refresh /></el-icon>立即对账</el-button>
     </div>
+    <div v-if="sum" class="kpis">
+      <div class="kpi g"><div class="l">已平单据</div><div class="v">{{ sum.balanced }}</div><div class="s">ERP 与明细完全一致（共 {{ sum.docs }} 张已过账单据）</div></div>
+      <div class="kpi" :class="{ bad: sum.diff_docs }"><div class="l">差异单据</div><div class="v">{{ sum.diff_docs }}</div><div class="s">需认领处理{{ sum.no_doc_diffs ? ` · 另有 ${sum.no_doc_diffs} 条无单差异` : '' }}</div></div>
+      <div class="kpi" :class="sum.diff_rate == null ? '' : sum.diff_rate < sum.target ? 'ok' : 'bad'"><div class="l">差异率</div><div class="v">{{ sum.diff_rate ?? '—' }}{{ sum.diff_rate != null ? '%' : '' }}</div><div class="s">目标 &lt; {{ sum.target }}%</div></div>
+    </div>
     <div class="card">
       <h3>月份</h3>
       <el-table :data="periods" size="small">
@@ -77,6 +82,7 @@ import { dictName, dictOptions } from '../utils'
 
 const METHODS = { REVERSAL: '冲销', ADJUST: '调整单', BIND: '补登', ALLOC: '重新分摊' }
 const periods = ref([])
+const sum = ref(null)
 const diffs = ref([])
 const state = ref('')
 const dlg = ref(false)
@@ -85,6 +91,7 @@ const rf = reactive({ reason_code: '', method: 'BIND', ref: '', note: '' })
 async function load() {
   periods.value = await api.get('/api/recon/periods')
   diffs.value = await api.get(`/api/recon/diffs?state=${state.value}`)
+  sum.value = await api.get('/api/recon/summary')
 }
 async function run() { const r = await api.post('/api/recon/run'); ElMessage.success(`已核对 ${r.checked} 项，新增差异 ${r.opened}`); load() }
 async function claim(row) { await api.post(`/api/recon/diffs/${row.id}/claim`); load() }

@@ -29,7 +29,8 @@ export const TODO_KINDS = {
   APPROVE: '审核申请', SIGN: '签收', TRANSFER_CONFIRM: '确认转交', QCONFIRM: '季度在用确认', LINE_APPROVE: '续期/改期审核',
   RETURN_DOC: '退料开单', URGENT_PENDING: '紧急待补', MUST_RETURN: '须全额退库', OVERDUE: '超期处理', UNFREEZE: '解冻',
   RECON_CLAIM: '认领差异', ERP_UNBOUND: '补登', REVERSAL_REVIEW: '冲销复核', LOCKED_LINE: '锁行修正', RENEW_REMIND: '续期提醒',
-  PROJECT_CLOSED: '结项清零', CLOSE_REMIND: '关账', DICT_APPROVE: '字典变更', NOTICE: '通知'
+  PROJECT_CLOSED: '结项清零', CLOSE_REMIND: '关账', DICT_APPROVE: '字典变更', NOTICE: '通知',
+  LAB_CONCLUSION: '回填实验结论', TRANSFER_ASSIGN: '外部受让认领'
 }
 
 export function todoLink(t, mobile = false) {
@@ -40,7 +41,8 @@ export function todoLink(t, mobile = false) {
     if (t.kind === 'TRANSFER_CONFIRM') return `${p}/todos?transfer=${t.ref_id}`
     if (t.kind === 'LINE_APPROVE') return `${p}/approve`
     if (t.kind === 'REVERSAL_REVIEW') return '/reversals'
-    if (t.kind === 'RETURN_DOC') return '/returns'
+    if (t.kind === 'RETURN_DOC') return '/dispose'
+    if (t.kind === 'TRANSFER_ASSIGN') return '/issue'
   }
   if (t.ref_type === 'diff') return '/recon'
   if (t.ref_type === 'erpline') return '/issue'
@@ -58,3 +60,11 @@ export const today = (offsetDays = 0) => {
 }
 
 export const isMobile = () => window.innerWidth < 820
+
+// 结存构成条的各段宽度（耗用 / 损耗 / 退库 / 报废 / 结存；拆出计入耗用段）
+export function barParts(l) {
+  const u = +l.consumed + +(l.split_out || 0), lo = +l.loss, r = +l.returned, s = +l.scrapped, b = Math.max(+l.balance, 0)
+  const tot = u + lo + r + s + b || 1
+  const w = n => `${(n / tot * 100).toFixed(1)}%`
+  return { u: w(u), l: w(lo), r: w(r), s: w(s), b: w(b) }
+}

@@ -28,7 +28,8 @@ const tabs = computed(() => [
   { path: '/m', name: '首页', icon: 'HomeFilled', badge: store.counts.tasks },
   { path: '/m/scan', name: '扫码', icon: 'Camera' },
   { path: '/m/apply', name: '申请', icon: 'EditPen' },
-  { path: '/m/mine', name: '我的', icon: 'User' }
+  { path: '/m/mine', name: '我的', icon: 'User' },
+  { path: '/m/ledger', name: '台账', icon: 'Tickets' }
 ])
 const isOn = p => p === '/m' ? route.path === '/m' : route.path.startsWith(p)
 onMounted(async () => {
@@ -49,7 +50,7 @@ onMounted(async () => {
 .grow { flex: 1; }
 .m-body { padding: 12px; }
 .m-tab { position: fixed; bottom: 0; left: 0; right: 0; height: 58px; background: #fff; border-top: 1px solid var(--line);
-  display: grid; grid-template-columns: repeat(4, 1fr); z-index: 10; padding-bottom: env(safe-area-inset-bottom); }
+  display: grid; grid-template-columns: repeat(5, 1fr); z-index: 10; padding-bottom: env(safe-area-inset-bottom); }
 .m-tab a { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; font-size: 11px; color: #8a99ab; }
 .m-tab a.on { color: var(--brand); font-weight: 700; }
 </style>
