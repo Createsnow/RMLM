@@ -168,7 +168,14 @@ def create_user(body: UserIn, user: User = Depends(current_user), db: Session = 
 def update_user(uid: int, body: UserIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
     require_role(user, "ADMIN")
     u = get_or_404(db, User, uid, "账号")
+    old_manager = u.manager_id
     _apply_user(db, u, body)
+    if u.manager_id != old_manager:
+        # 直属上级变了：名下行待审的续期 / 改归还日改派给新上级（业务确认 2026-11-25）
+        from ..services.lineops import reassign_user_requests
+
+        db.flush()
+        reassign_user_requests(db, u)
     if body.password:
         u.password_hash, u.must_change_pw = hash_password(body.password), True
         u.token_version = (u.token_version or 0) + 1  # 重置密码：此前发出的登录凭证全部失效
@@ -179,16 +186,22 @@ def update_user(uid: int, body: UserIn, user: User = Depends(current_user), db: 
     return user_out(u, db)
 
 
-def _clearance(db: Session, u: User) -> list[dict]:
-    left = wecom.open_lines(db, u.id)
-    calcs = ledger.load(db, left)
-    return [{"id": l.id, "code": l.code, "balance": s(calcs[l.id].balance)} for l in left]
+def _clearance(db: Session, u: User) -> dict:
+    b = wecom.offboard_blockers(db, u.id)
+    calcs = ledger.load(db, b["lines"])
+    return {
+        "lines": [{"id": l.id, "code": l.code, "balance": s(calcs[l.id].balance)} for l in b["lines"]],
+        "transfers": [{"event_id": e.id, "code": db.get(LedgerLine, e.line_id).code,
+                       "from": db.get(User, e.holder_id).name} for e in b["transfers"]],
+        "reqs": [{"id": r.id, "no": r.no, "status": r.status} for r in b["reqs"]],
+        "text": wecom.blockers_text(b),
+    }
 
 
 def _check_clearance(db: Session, u: User) -> None:
-    left = _clearance(db, u)
-    if left:
-        raise BizError(f"{u.name} 名下还有 {len(left)} 行结存未清零，须先退库或转交后才能停用（离职 / 调岗卡点）")
+    c = _clearance(db, u)
+    if c["text"]:
+        raise BizError(f"{u.name} {c['text']}，处理完后才能停用（离职 / 调岗卡点）")
 
 
 @router.get("/users/{uid}/clearance")
@@ -197,8 +210,8 @@ def clearance(uid: int, user: User = Depends(current_user), db: Session = Depend
     u = get_or_404(db, User, uid, "账号")
     if not (has_role(user, "ADMIN", "DEPT_HEAD", "VP") or u.manager_id == user.id or u.id == user.id):
         raise forbid()
-    left = _clearance(db, u)
-    return {"user": u.name, "clear": not left, "lines": left}
+    c = _clearance(db, u)
+    return {"user": u.name, "clear": not c["text"], **c}
 
 
 @router.post("/users/{uid}/unfreeze")

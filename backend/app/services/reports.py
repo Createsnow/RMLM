@@ -169,7 +169,8 @@ def observe(db: Session, lines: list[LedgerLine], calcs) -> dict:
     q = quarter_of(today)
     snap = set(db.scalars(select(OverdueSnapshot.line_id).where(OverdueSnapshot.quarter == q)))
     by_id = {l.id: l for l in lines}
-    cleared = sum(1 for lid in snap if lid in by_id and not ledger.is_overdue(by_id[lid], calcs[lid], today))
+    snap = {lid for lid in snap if lid in by_id}  # 分子分母都按本人可见范围（否则组长看到的清理率被别组的行拉低）
+    cleared = sum(1 for lid in snap if not ledger.is_overdue(by_id[lid], calcs[lid], today))
     reqs = list(db.scalars(select(Requisition).where(Requisition.decided_at.is_not(None))))
     in24 = sum(1 for r in reqs if r.decided_at - r.created_at <= timedelta(hours=24))
     issued = sum(D(l.qty) for l in lines if l.level == 1)
@@ -206,8 +207,11 @@ def weekly_hanging(db: Session, user: User) -> dict:
             out["overdue"].append(b)
         if l.urgent and l.urgent_overdue and not l.urgent_resolved:
             out["urgent"].append(b)
-        if st == "S3" and c.last_action_at and c.last_action_at < now - timedelta(days=30):
-            out["hold_30d"].append(b)
+        if st == "S3":
+            # 从进入暂存 / 外出（最近一次暂存登记）算起；中间更新位置、季度确认、回填结论都不重新计时
+            since = max((e.created_at for e in ledger.effective(c.events) if e.etype == "HOLD"), default=None)
+            if since and since < now - timedelta(days=30):
+                out["hold_30d"].append(b)
         if st == "S6":
             out["doc_pending"].append(b)
     from .lineops import LAB_CONCLUSION_DAYS, lab_pending

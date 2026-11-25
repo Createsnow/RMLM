@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from .. import clock
 from ..models import ErpDoc, ErpLine, Freeze, JobRun, LedgerLine, Project, Requisition, Todo, User
 from ..perms import active_delegates, default_approver
-from . import disposal, doc_sync, erp, ledger, master_sync, recon, wecom
+from . import disposal, doc_sync, erp, ledger, master_sync, recon, todo_sweep, wecom
 from .common import add_todo, notify, period_of, quarter_of, users_with_role
 
 log = logging.getLogger("rmlm.jobs")
@@ -30,7 +30,7 @@ def _manager_or_head(db: Session, user_id: int) -> int | None:
 # （原来任何一步抛错，整次巡检全部回滚，连"今天已跑过"的标记也回滚，某一步持续出错时每日任务永远跑不成）。
 STEPS = {
     "push": "企微推送补发", "doc_sync": "拉取金蝶单据", "auto_bound": "自动生成领用行", "approve": "审核提醒与升级",
-    "urgent": "紧急领用 24 小时检查", "unbound": "ERP 有单无明细", "escalate_todo": "待办升级", "locked": "结存异常锁行",
+    "urgent": "紧急领用 24 小时检查", "unbound": "ERP 有单无明细", "sweep": "关闭已办完的待办", "escalate_todo": "待办升级", "locked": "结存异常锁行",
     "recon": "每日对账", "material_sync": "金蝶物料同步", "contact_sync": "企微通讯录同步", "lab": "D02 实验结论预警",
     "overdue": "超期与冻结", "lapsed": "长周期季度确认过期", "weekly": "报废批次", "quarterly": "季度任务",
     "monthly": "关账提醒",
@@ -167,6 +167,8 @@ def quarter_hour(db: Session) -> dict:
     stats.update(appr if "error" not in appr else {"remind": appr, "escalate": appr})
     stats["urgent"] = _step(db, "urgent", _urgent)
     stats["unbound"] = _step(db, "unbound", _unbound)
+    # 升级之前先关掉已经办完的处置类待办（行已清零、归还日已延后、事件已冲销、单据已反审核……），免得误升级
+    stats["sweep"] = _step(db, "sweep", todo_sweep.sweep)
     esc = _step(db, "escalate_todo", _escalate_todos)
     stats.update(esc if "error" not in esc else {"todo_l2": esc, "todo_l3": esc})
     stats["locked"] = _step(db, "locked", _lock_abnormal)
@@ -213,7 +215,8 @@ def _overdue(db: Session) -> dict:
             recently_released = db.scalar(select(Freeze.id).where(
                 Freeze.user_id == holder.id, Freeze.released_at.is_not(None),
                 Freeze.released_at > now - timedelta(days=14)).limit(1))
-            if (standard and not holder.frozen and not recently_released
+            # 最上级（没有直属上级的人，如研发副总）不冻结：冻结后没人能解冻（业务确认 2026-11-25）
+            if (standard and holder.manager_id and not holder.frozen and not recently_released
                     and (today - line.due_date).days > 14 and idle_since < now - timedelta(days=14)):
                 holder.frozen = True
                 db.add(Freeze(user_id=holder.id, line_id=line.id, reason=f"{line.code} 超期连续 2 周无动作"))
