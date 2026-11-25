@@ -45,7 +45,7 @@ class Settings:
         # ---------- 照片 / 静态文件
         self.photo_dir: Path = Path(_env("RMLM_PHOTO_DIR", "./data/photos")).resolve()
         self.photo_max_kb: int = _int("RMLM_PHOTO_MAX_KB", 300)
-        self.watermark_font: str = _env("RMLM_WATERMARK_FONT", "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc")
+        self.watermark_font: str = _env("RMLM_WATERMARK_FONT").strip()  # 空 = 按 photos.FONT_CANDIDATES 自动找中文字体
         self.static_dir: Path = Path(
             _env("RMLM_STATIC_DIR", str(Path(__file__).resolve().parents[2] / "frontend" / "dist"))
         )
