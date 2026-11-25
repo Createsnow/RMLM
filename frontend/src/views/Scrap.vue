@@ -27,6 +27,7 @@
           <template v-if="row.status === 'BOUND'"><el-tag type="success" size="small">已核销 {{ row.erp_doc_no }}</el-tag>
             <el-tag v-if="row.received" size="small" style="margin-left: 4px">实物已交仓</el-tag></template>
           <template v-else-if="hasRole('KEEPER')">
+            <el-tag v-if="row.erp_doc_no" type="warning" size="small" style="margin-right: 4px">部分核销 {{ row.erp_doc_no }}</el-tag>
             <el-select v-model="pick[row.id]" placeholder="选报废出库单" size="small" style="width: 140px">
               <el-option v-for="d in docs" :key="d.id" :value="d.id" :label="d.no" />
             </el-select>
@@ -58,7 +59,9 @@ async function load() {
 async function build() { const r = await api.post('/api/scrap/batches/build'); ElMessage.success(r.created.length ? `已生成 ${r.created.join('、')}` : '没有新的待处置报废'); load() }
 async function bind(row) {
   const r = await api.post(`/api/scrap/batches/${row.id}/bind?erp_doc_id=${pick[row.id]}`)
-  ElMessage[r.leftover.length ? 'warning' : 'success'](r.leftover.length ? '已核销，有未摊完数量进入差异池' : '已核销')
+  const rest = Number(r.batch_rest || 0)
+  if (rest > 0) ElMessage.warning(`报废单不够摊，批次还剩 ${r.batch_rest} 未核销，请再挂一张报废单`)
+  else ElMessage[r.leftover.length ? 'warning' : 'success'](r.leftover.length ? '已核销，有未摊完数量进入差异池' : '已核销')
   load()
 }
 onMounted(load)

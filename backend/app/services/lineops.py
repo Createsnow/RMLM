@@ -20,7 +20,10 @@ def _require_photos(photos: list[int] | None, what: str) -> list[int]:
     return photos
 
 
-def _guard(line: LedgerLine, need_signed: bool = True) -> None:
+def _guard(db: Session, line: LedgerLine, need_signed: bool = True) -> None:
+    # 锁住这条领用行再校验结存：同一行的两个动作同时提交时（如两台手机同时扣料），
+    # 后到的一方等前一方提交后再读结存，避免两边都按旧结存通过、结存被扣成负数
+    db.refresh(line, with_for_update=True)
     if line.voided:
         raise BizError("该行已作废")
     if line.locked:
@@ -70,7 +73,7 @@ def _check_qty(qty, balance: Decimal) -> Decimal:
 def sign(db: Session, line: LedgerLine, op: User, photos: list[int], codes: list[str] | None = None) -> list[LedgerLine]:
     """本人签收。已接仓储时必须扫实物上的仓储条码：一个码挂一条领用行，扫了几个码就分成几条行，
     各码数量合计须等于本行数量。返回签收后的全部行（第一条是原行）。"""
-    _guard(line, need_signed=False)
+    _guard(db, line, need_signed=False)
     if line.signed:
         raise BizError("该行已签收")
     if op.id != line.holder_id:
@@ -153,9 +156,9 @@ def _twin(db: Session, line: LedgerLine, qty) -> LedgerLine:
 def consume(db: Session, line: LedgerLine, op: User, qty, dest: str | None, is_loss: bool,
             loss_reason: str | None, note: str | None, photos: list[int], ship_no: str | None = None,
             location_id: int | None = None) -> Event:
-    _guard(line)
+    _guard(db, line)
     proxy = _operator(db, line, op)
-    c = ledger.load_one(db, line)
+    c = ledger.load_one(db, line, lock=True)
     q = _check_qty(qty, c.balance)
     extra, loc_id = None, None
     if is_loss:
@@ -219,12 +222,12 @@ def conclusion(db: Session, target: Event, op: User, text: str, photos: list[int
 # ------------------------------------------------------------------ 拆分换码
 def split(db: Session, line: LedgerLine, op: User, pieces: list, loss_qty, loss_reason: str | None,
           note: str | None, photos: list[int]) -> dict:
-    _guard(line)
+    _guard(db, line)
     proxy = _operator(db, line, op)
     code_rec = db.scalar(select(MaterialCode).where(MaterialCode.code == line.code))
     if code_rec and code_rec.layer >= 3:
         raise BizError("物料码已到第三层，不能再拆分；请退库后重新赋码")
-    c = ledger.load_one(db, line)
+    c = ledger.load_one(db, line, lock=True)
     ps = [D(p) for p in pieces]
     if not ps or any(p <= 0 for p in ps):
         raise BizError("至少拆出一份，且每份数量大于 0")
@@ -303,9 +306,9 @@ def _location(db: Session, location_id: int, kinds: tuple[str, ...] = ("STOCK", 
 
 
 def hold(db: Session, line: LedgerLine, op: User, location_id: int, note: str | None, photos: list[int]) -> Event:
-    _guard(line)
+    _guard(db, line)
     proxy = _operator(db, line, op)
-    c = ledger.load_one(db, line)
+    c = ledger.load_one(db, line, lock=True)
     st = ledger.status_of(line, c)
     if st == "S5":
         raise BizError("超期未结案的行不能暂存，请先退库、报废或申请改归还日")
@@ -320,9 +323,9 @@ def hold(db: Session, line: LedgerLine, op: User, location_id: int, note: str | 
 
 
 def move(db: Session, line: LedgerLine, op: User, location_id: int, note: str | None, photos: list[int] | None) -> Event:
-    _guard(line)
+    _guard(db, line)
     proxy = _operator(db, line, op)
-    c = ledger.load_one(db, line)
+    c = ledger.load_one(db, line, lock=True)
     if ledger.status_of(line, c) != "S3":
         raise BizError("只有暂存中的行可以更新位置")
     loc = _location(db, location_id)
@@ -338,7 +341,7 @@ def _pending_transfer(db: Session, line: LedgerLine) -> Event | None:
 
 def transfer_request(db: Session, line: LedgerLine, op: User, to_user_id: int | None, reason: str,
                      external_name: str | None = None) -> Event:
-    _guard(line)
+    _guard(db, line)
     proxy = _operator(db, line, op)
     if not (reason or "").strip():
         raise BizError("请填写转交原因")
@@ -350,7 +353,7 @@ def transfer_request(db: Session, line: LedgerLine, op: User, to_user_id: int | 
             raise BizError("受让人不存在或已停用")
         if to.id == line.holder_id:
             raise BizError("受让人不能是当前持有人")
-    if ledger.load_one(db, line).balance <= 0:
+    if ledger.load_one(db, line, lock=True).balance <= 0:
         raise BizError("结存为 0，无需转交")
     if _pending_transfer(db, line):
         raise BizError("已有待确认的转交，请等待受让人处理")
@@ -374,7 +377,7 @@ def transfer_assign(db: Session, req: Event, op: User, to_user_id: int) -> Event
     if req.etype != "TRANSFER_REQ" or req.status != "PENDING" or not (req.extra or {}).get("external"):
         raise BizError("只有待认领的外部转交可以指派")
     line = db.get(LedgerLine, req.line_id)
-    _guard(line)
+    _guard(db, line)
     to = db.get(User, to_user_id) if to_user_id else None
     if not to or not to.active:
         raise BizError("受让人不存在或已停用")
@@ -413,7 +416,7 @@ def transfer_decide(db: Session, req: Event, op: User, accept: bool) -> Event:
     if op.id != req.to_user_id:
         raise forbid("只有受让人本人可以确认")
     line = db.get(LedgerLine, req.line_id)
-    _guard(line)
+    _guard(db, line)
     req.status = "EFFECTIVE" if accept else "REJECTED"
     req.reviewed_by, req.reviewed_at = op.id, clock.now()
     close_todos(db, "event", req.id)
@@ -432,9 +435,9 @@ def transfer_decide(db: Session, req: Event, op: User, accept: bool) -> Event:
 
 # ------------------------------------------------------------------ 退库 / 报废
 def return_(db: Session, line: LedgerLine, op: User, qty, note: str | None, photos: list[int] | None) -> Event:
-    _guard(line)
+    _guard(db, line)
     proxy = _operator(db, line, op)
-    c = ledger.load_one(db, line)
+    c = ledger.load_one(db, line, lock=True)
     q = _check_qty(qty, c.balance)
     e = _event(db, line, "RETURN", op, proxy, qty=q, dest="D06", note=note, photos=photos or None)
     for k in users_with_role(db, "KEEPER"):
@@ -444,9 +447,9 @@ def return_(db: Session, line: LedgerLine, op: User, qty, note: str | None, phot
 
 def scrap(db: Session, line: LedgerLine, op: User, mode: str, qty, reason: str | None, box: str | None,
           note: str | None, photos: list[int]) -> Event:
-    _guard(line)
+    _guard(db, line)
     proxy = _operator(db, line, op)
-    c = ledger.load_one(db, line)
+    c = ledger.load_one(db, line, lock=True)
     _require_photos(photos, "报废")
     if mode == "RESIDUE":
         # 路径 A：用完后的残料，按损耗清零；不隔离、不开 ERP 报废单
@@ -469,7 +472,7 @@ def scrap(db: Session, line: LedgerLine, op: User, mode: str, qty, reason: str |
 
 # ------------------------------------------------------------------ 长周期：季度确认、续期；标准类：改归还日
 def quarter_confirm(db: Session, line: LedgerLine, op: User, note: str | None, photos: list[int] | None) -> Event:
-    _guard(line)
+    _guard(db, line)
     proxy = _operator(db, line, op)
     if not line.long_cycle:
         raise BizError("只有长周期物料需要季度在用确认")
@@ -488,7 +491,7 @@ def _line_approver(db: Session, line: LedgerLine) -> User:
 
 
 def renew_request(db: Session, line: LedgerLine, op: User, months: int, reason: str) -> Event:
-    _guard(line)
+    _guard(db, line)
     proxy = _operator(db, line, op)
     if not line.long_cycle:
         raise BizError("只有长周期物料可以续期")
@@ -503,7 +506,7 @@ def renew_request(db: Session, line: LedgerLine, op: User, months: int, reason: 
 
 
 def due_change_request(db: Session, line: LedgerLine, op: User, new_date: date, reason: str) -> Event:
-    _guard(line)
+    _guard(db, line)
     proxy = _operator(db, line, op)
     if new_date <= clock.today():
         raise BizError("新的归还日必须晚于今天")
@@ -578,6 +581,7 @@ def reversal_decide(db: Session, rev: Event, op: User, approve: bool, note: str 
         raise forbid("发起人和复核人不能是同一人")
     target = db.get(Event, rev.reverses_id)
     line = db.get(LedgerLine, rev.line_id)
+    db.refresh(line, with_for_update=True)  # 与该行上的其他动作串行，结存按最新事件算
     if approve and target.etype == "SPLIT_OUT":
         kids = list(db.scalars(select(LedgerLine).where(LedgerLine.split_event_id == target.id)))
         for k in kids:
@@ -594,8 +598,13 @@ def reversal_decide(db: Session, rev: Event, op: User, approve: bool, note: str 
     rev.reviewed_by, rev.reviewed_at, rev.note = op.id, clock.now(), note
     close_todos(db, "event", rev.id)
     if approve:
-        c = ledger.load_one(db, line)
+        c = ledger.load_one(db, line, lock=True)
         if c.balance < 0 or c.balance > D(line.qty):
             line.locked, line.lock_reason = True, "冲销后结存异常"
+        elif line.locked:
+            # 蓝图 3.6：结存为负锁行，IT 复盘后冲销修正、结存恢复正常即解锁；原因留在冲销事件里
+            line.locked, line.lock_reason = False, None
+            close_todos(db, "line", line.id, ("LOCKED_LINE",))
+            notify(db, line.holder_id, f"{line.code} 已通过冲销修正结存（{rev.reason}），解除锁定", "line", line.id)
     notify(db, rev.operator_id, f"冲销已{'通过' if approve else '驳回'}：{line.code}", "line", line.id)
     return rev

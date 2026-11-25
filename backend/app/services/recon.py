@@ -3,7 +3,7 @@ from collections import defaultdict
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, true
 from sqlalchemy.orm import Session
 
 from .. import clock
@@ -40,7 +40,11 @@ def _compute(db: Session) -> dict[str, dict]:
     cur_period = period_of(now)
     adj = _adjustments(db)
     rows: dict[str, dict] = {}
-    alloc_by_line = dict(db.execute(select(DocAlloc.erp_line_id, func.sum(DocAlloc.qty)).group_by(DocAlloc.erp_line_id)).all())
+    # 被有效冲销的事件，其分摊不再算作中台明细：ERP 单据上的数量没有了中台对应，差额要进差异池
+    reversed_ids = set(db.scalars(select(Event.reverses_id).where(Event.etype == "REVERSAL", Event.status == "EFFECTIVE")))
+    live = DocAlloc.event_id.not_in(reversed_ids) if reversed_ids else true()
+    alloc_by_line = dict(db.execute(select(DocAlloc.erp_line_id, func.sum(DocAlloc.qty)).where(live)
+                                    .group_by(DocAlloc.erp_line_id)).all())
     alloc_by_event = dict(db.execute(select(DocAlloc.event_id, func.sum(DocAlloc.qty)).group_by(DocAlloc.event_id)).all())
     for doc in db.scalars(select(ErpDoc).where(ErpDoc.doc_type != "TZ", ErpDoc.posted.is_(True))):
         for ln in doc.lines:
@@ -61,7 +65,6 @@ def _compute(db: Session) -> dict[str, dict]:
                 rows[f"ERP:{ln.id}"] = {**base, "kind": "TL_MISMATCH" if doc.doc_type == "TL" else "BF_MISMATCH",
                                        "detail_qty": detail, "line_id": None, "owner_hint": None}
     # 中台有、ERP 无：退库与整件报废事件在 7 天或跨月后仍未挂单
-    reversed_ids = set(db.scalars(select(Event.reverses_id).where(Event.etype == "REVERSAL", Event.status == "EFFECTIVE")))
     for e in db.scalars(select(Event).where(Event.etype.in_(("RETURN", "SCRAP")), Event.status == "EFFECTIVE")):
         if e.id in reversed_ids or (e.etype == "SCRAP" and e.scrap_mode != "WHOLE"):
             continue
@@ -112,6 +115,17 @@ def run(db: Session) -> dict:
             close_todos(db, "diff", d.id)
         elif diff != 0 and d.state == "RESOLVED":
             d.state, d.resolved_at = ("CLAIMED" if d.claimed_at else "OPEN"), None
+    # 差异的来源已不存在：紧急交接行补挂了 ERP 单（改由该单据行按"领料数量"对账）、退库 / 报废事件已被冲销。
+    # 这类差异不会再被算出来，必须在这里平掉，否则差额永远不为 0、月份永远关不了账。
+    # ERP 单据行（ERP: 开头）消失只可能是金蝶反审核，保持原样由人工核对。
+    for key, d in existing.items():
+        if key in rows or d.state == "RESOLVED" or not key.startswith(("LINE:", "EVT:")):
+            continue
+        d.detail_qty, d.diff = d.erp_qty, D(0)
+        d.state, d.resolved_at = "RESOLVED", clock.now()
+        if not d.reason_code:
+            d.note = d.note or ("系统自动平账（已补挂 ERP 单）" if key.startswith("LINE:") else "系统自动平账（事件已冲销）")
+        close_todos(db, "diff", d.id)
     db.flush()
     return {"checked": len(rows), "opened": opened}
 

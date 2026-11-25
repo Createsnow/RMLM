@@ -41,13 +41,14 @@ def effective(events: list[Event]) -> list[Event]:
     return [e for e in events if e.status == "EFFECTIVE" and e.id not in reversed_ids and e.etype != "REVERSAL"]
 
 
-def alloc_map(db: Session, event_ids: list[int]) -> dict[int, Decimal]:
+def alloc_map(db: Session, event_ids: list[int], lock: bool = False) -> dict[int, Decimal]:
     if not event_ids:
         return {}
-    rows = db.execute(
-        select(DocAlloc.event_id, func.sum(DocAlloc.qty)).where(DocAlloc.event_id.in_(event_ids)).group_by(DocAlloc.event_id)
-    )
-    return {eid: D(q) for eid, q in rows}
+    q = select(DocAlloc.event_id, DocAlloc.qty).where(DocAlloc.event_id.in_(event_ids))
+    out: dict[int, Decimal] = {}
+    for eid, qty in db.execute(q.with_for_update(read=True) if lock else q):
+        out[eid] = out.get(eid, D(0)) + D(qty)
+    return out
 
 
 def calc(line: LedgerLine, events: list[Event], allocs: dict[int, Decimal]) -> Calc:
@@ -118,18 +119,22 @@ def code_state(code: MaterialCode, line: LedgerLine, c: Calc) -> str:
     return "B2"
 
 
-def load(db: Session, lines: list[LedgerLine]) -> dict[int, Calc]:
-    """批量计算一组行的结存。"""
+def load(db: Session, lines: list[LedgerLine], lock: bool = False) -> dict[int, Calc]:
+    """批量计算一组行的结存。lock=True 用锁定读取（读最新已提交的数据）：动作校验结存时用，
+    配合行锁，避免 MySQL 可重复读下读到本事务开始时的旧快照、把并发提交的事件漏算。"""
     ids = [l.id for l in lines]
     if not ids:
         return {}
-    events = list(db.scalars(select(Event).where(Event.line_id.in_(ids)).order_by(Event.id)))
+    q = select(Event).where(Event.line_id.in_(ids)).order_by(Event.id)
+    if lock:
+        q = q.with_for_update(read=True)
+    events = list(db.scalars(q))
     by_line: dict[int, list[Event]] = {i: [] for i in ids}
     for e in events:
         by_line[e.line_id].append(e)
-    allocs = alloc_map(db, [e.id for e in events if e.etype in ("RETURN", "SCRAP")])
+    allocs = alloc_map(db, [e.id for e in events if e.etype in ("RETURN", "SCRAP")], lock=lock)
     return {l.id: calc(l, by_line[l.id], allocs) for l in lines}
 
 
-def load_one(db: Session, line: LedgerLine) -> Calc:
-    return load(db, [line])[line.id]
+def load_one(db: Session, line: LedgerLine, lock: bool = False) -> Calc:
+    return load(db, [line], lock=lock)[line.id]

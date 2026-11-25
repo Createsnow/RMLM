@@ -9,17 +9,28 @@ from .. import clock
 from ..errors import BizError
 from ..models import DocAlloc, ErpDoc, ErpLine, Event, LedgerLine, ScrapBatch, User
 from ..perms import require_role
-from .common import D, close_todos, next_seq
+from .common import D, close_todos, next_seq, qs
+
+
+def _reversed_ids(db: Session) -> set[int]:
+    return set(db.scalars(select(Event.reverses_id).where(Event.etype == "REVERSAL", Event.status == "EFFECTIVE")))
 
 
 def _allocated(db: Session, *, erp_line_id: int | None = None, event_id: int | None = None) -> Decimal:
     q = select(func.coalesce(func.sum(DocAlloc.qty), 0))
-    q = q.where(DocAlloc.erp_line_id == erp_line_id) if erp_line_id else q.where(DocAlloc.event_id == event_id)
+    if erp_line_id:
+        # 单据行已摊数量不算被冲销的事件：冲销后这部分单据数量空出来，可重新分摊给正确的事件
+        q = q.where(DocAlloc.erp_line_id == erp_line_id)
+        rev = _reversed_ids(db)
+        if rev:
+            q = q.where(DocAlloc.event_id.not_in(rev))
+    else:
+        q = q.where(DocAlloc.event_id == event_id)
     return D(db.scalar(q))
 
 
 def _effective_ids(db: Session, etype: str) -> list[Event]:
-    reversed_ids = set(db.scalars(select(Event.reverses_id).where(Event.etype == "REVERSAL", Event.status == "EFFECTIVE")))
+    reversed_ids = _reversed_ids(db)
     evs = db.scalars(select(Event).where(Event.etype == etype, Event.status == "EFFECTIVE").order_by(Event.created_at, Event.id))
     return [e for e in evs if e.id not in reversed_ids]
 
@@ -49,8 +60,13 @@ def allocate(db: Session, op: User, doc: ErpDoc, event_ids: list[int], kind: str
     expected = {"RET": ("TL", "RETURN"), "SCRAP": ("BF", "SCRAP")}[kind]
     if doc.doc_type != expected[0]:
         raise BizError("单据类型与分摊类型不一致")
+    if not doc.posted:
+        # 蓝图：未挂 ERP 单据的行不得结案——未过账的单据在金蝶里还不算数，不能拿来核销
+        raise BizError(f"单据 {doc.no} 在金蝶尚未过账，过账后才能分摊核销")
     events = [db.get(Event, i) for i in event_ids]
-    if not events or any(e is None or e.etype != expected[1] or e.status != "EFFECTIVE" for e in events):
+    rev = _reversed_ids(db)
+    if not events or any(e is None or e.etype != expected[1] or e.status != "EFFECTIVE" or e.id in rev
+                         for e in events):
         raise BizError("所选事件无效")
     if kind == "SCRAP" and any(e.scrap_mode != "WHOLE" for e in events):
         raise BizError("残料报废不开 ERP 报废单")
@@ -113,8 +129,15 @@ def build_batches(db: Session) -> list[ScrapBatch]:
 
 
 def bind_batch(db: Session, op: User, batch: ScrapBatch, doc: ErpDoc) -> dict:
+    """批次挂 ERP 报废单。报废单数量不够摊完整个批次时，批次保持未核销，可再挂下一张报废单；
+    全部摊完才置为已核销（否则剩下的明细既不在新批次里、也挂不了单，永远停在"待单据处置"）。"""
     if batch.status == "BOUND":
         raise BizError("该批次已核销")
     res = allocate(db, op, doc, list(batch.event_ids), "SCRAP")
-    batch.status, batch.erp_doc_id = "BOUND", doc.id
+    batch.erp_doc_id = doc.id
+    rev = _reversed_ids(db)
+    rest = sum((D(db.get(Event, i).qty) - _allocated(db, event_id=i) for i in batch.event_ids if i not in rev), D(0))
+    if rest <= 0:
+        batch.status = "BOUND"
+    res["batch_rest"] = qs(max(rest, D(0)))
     return res
