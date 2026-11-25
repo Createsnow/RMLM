@@ -16,15 +16,17 @@ import { reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { api } from '../api'
-import { logout } from '../store'
+import { logout, setLogin, store } from '../store'
 
 const router = useRouter()
 const f = reactive({ old: '', new: '' })
 const again = ref('')
 async function save() {
   if (f.new !== again.value) return ElMessage.error('两次输入不一致')
-  await api.post('/api/auth/password', f)
+  const r = await api.post('/api/auth/password', f)
+  // 改密码后其他设备上的旧登录凭证失效，本设备换用新凭证
+  if (r.token) setLogin(r.token, { ...store.user, must_change_pw: false })
   ElMessage.success('已修改')
-  router.back()
+  router.replace(location.pathname.startsWith('/m') ? '/m' : '/')
 }
 </script>

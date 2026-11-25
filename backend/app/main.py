@@ -11,7 +11,7 @@ from sqlalchemy.schema import CreateColumn
 
 from . import db as dbmod
 from .api import biz, core
-from .config import settings
+from .config import check_jwt_secret, settings
 from .dicts import SEED
 from .models import AuditLog, DictItem, User
 from .security import hash_password
@@ -74,6 +74,7 @@ def init_db() -> None:
 
 @asynccontextmanager
 async def lifespan(_app):
+    check_jwt_secret(settings.jwt_secret)
     init_db()
     if settings.wecom_enabled:
         from .services.wecom import install_push_hook

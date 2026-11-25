@@ -48,6 +48,10 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(String(128))
     must_change_pw: Mapped[bool] = mapped_column(Boolean, default=True)
     wecom_userid: Mapped[str | None] = mapped_column(String(64))  # 企业微信 UserID，用于免密登录、通讯录同步、消息推送
+    # 密码登录连续输错次数与锁定截止时间；改密码 / 重置密码时 token_version + 1，旧登录凭证随即失效
+    failed_logins: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime)
+    token_version: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
 
     manager: Mapped["User | None"] = relationship(remote_side=[id])

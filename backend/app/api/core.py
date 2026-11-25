@@ -1,5 +1,5 @@
 """登录、账号与组织、代理、主数据、字典、待办、照片、审计、定时任务手动触发。"""
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, File, Request, UploadFile
 from fastapi.responses import FileResponse
@@ -14,8 +14,9 @@ from ..db import get_db
 from ..errors import BizError, forbid, not_found
 from ..models import (AuditLog, Delegate, DictChange, DictItem, Freeze, LedgerLine, Location, Material, Photo, Project,
                       Todo, User)
-from ..perms import ROLES, ancestors, descendants, has_role, require_role, validate_delegate
-from ..security import current_user, hash_password, make_token, verify_password
+from ..perms import (ROLES, ancestors, can_view_line, descendants, has_role, require_role, validate_delegate,
+                     visible_user_ids)
+from ..security import current_user, hash_password, make_token, must_change_now, verify_password
 from ..services import erp as erpsvc
 from ..services import jobs, ledger, master_sync, wecom
 from ..services.k3cloud import K3Error
@@ -35,9 +36,19 @@ class LoginIn(BaseModel):
 @router.post("/auth/login")
 def login(body: LoginIn, db: Session = Depends(get_db)):
     u = db.scalar(select(User).where(User.username == body.username.strip()))
+    now = clock.now()
+    if u is not None and u.locked_until and u.locked_until > now:
+        mins = max(1, int((u.locked_until - now).total_seconds() // 60) + 1)
+        raise BizError(f"密码连续输错次数过多，账号已锁定，请 {mins} 分钟后再试或联系管理员", 401)
     if not u or not u.active or not verify_password(body.password, u.password_hash):
+        if u is not None:
+            u.failed_logins = (u.failed_logins or 0) + 1
+            if u.failed_logins >= settings.login_max_fails:
+                u.failed_logins, u.locked_until = 0, now + timedelta(minutes=settings.login_lock_minutes)
+            db.commit()  # 抛错会回滚，计数必须先提交
         raise BizError("账号或密码错误", 401)
-    return {"token": make_token(u), "user": user_out(u, db)}
+    u.failed_logins, u.locked_until = 0, None
+    return {"token": make_token(u, "pw"), "user": user_out(u, db)}
 
 
 # ------------------------------------------------------------------ 企业微信登录（网页授权）
@@ -60,16 +71,16 @@ class WecomLoginIn(BaseModel):
 @router.post("/auth/wecom")
 def wecom_login(body: WecomLoginIn, db: Session = Depends(get_db)):
     u = wecom.login_by_code(db, body.code.strip())
-    return {"token": make_token(u), "user": user_out(u, db)}
+    return {"token": make_token(u, "wx"), "user": user_out(u, db)}
 
 
 @router.get("/auth/me")
-def me(user: User = Depends(current_user), db: Session = Depends(get_db)):
+def me(request: Request, user: User = Depends(current_user), db: Session = Depends(get_db)):
     d = user_out(user, db)
     d["delegated_by"] = [p.name for p in db.scalars(
         select(User).join(Delegate, Delegate.principal_id == User.id).where(
             Delegate.agent_id == user.id, Delegate.start_at <= clock.now(), Delegate.end_at >= clock.now()))]
-    d["must_change_pw"] = user.must_change_pw
+    d["must_change_pw"] = must_change_now(user, getattr(request.state, "login_method", None))
     return d
 
 
@@ -79,13 +90,17 @@ class PwIn(BaseModel):
 
 
 @router.post("/auth/password")
-def change_password(body: PwIn, user: User = Depends(current_user)):
+def change_password(request: Request, body: PwIn, user: User = Depends(current_user)):
     if not verify_password(body.old, user.password_hash):
         raise BizError("原密码不正确")
     if len(body.new) < 8:
         raise BizError("新密码至少 8 位")
+    if body.new == body.old:
+        raise BizError("新密码不能与原密码相同")
     user.password_hash, user.must_change_pw = hash_password(body.new), False
-    return {"ok": True}
+    user.token_version = (user.token_version or 0) + 1  # 其他设备上的旧登录凭证随即失效
+    # 本设备换发新凭证，免得刚改完密码就被踢出
+    return {"ok": True, "token": make_token(user, getattr(request.state, "login_method", None) or "pw")}
 
 
 # ------------------------------------------------------------------ 账号与组织（创建账号时勾选角色）
@@ -156,6 +171,8 @@ def update_user(uid: int, body: UserIn, user: User = Depends(current_user), db: 
     _apply_user(db, u, body)
     if body.password:
         u.password_hash, u.must_change_pw = hash_password(body.password), True
+        u.token_version = (u.token_version or 0) + 1  # 重置密码：此前发出的登录凭证全部失效
+        u.failed_logins, u.locked_until = 0, None  # 顺带解除锁定
     if not body.active and u.active:
         _check_clearance(db, u)
     u.active = body.active
@@ -493,7 +510,20 @@ async def upload_photo(file: UploadFile = File(...), user: User = Depends(curren
 @router.get("/photos/{pid}")
 def get_photo(pid: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
     p = get_or_404(db, Photo, pid, "照片")
+    if not _can_view_photo(db, user, p):
+        raise forbid("无权查看该照片")
     return FileResponse(settings.photo_dir / p.path, media_type="image/jpeg")
+
+
+def _can_view_photo(db: Session, user: User, p: Photo) -> bool:
+    """上传人本人、全局可见角色，或能看到引用这张照片的领用行的人。"""
+    if p.uploader_id == user.id or visible_user_ids(db, user) is None:
+        return True
+    from ..models import Event
+
+    # JSON_CONTAINS(照片列表, '5')：MySQL 8 与 MariaDB 都支持，候选值以 JSON 文本传入
+    line_ids = set(db.scalars(select(Event.line_id).where(func.json_contains(Event.photos, str(p.id)) == 1)))
+    return any(can_view_line(db, user, l) for l in db.scalars(select(LedgerLine).where(LedgerLine.id.in_(line_ids or {0}))))
 
 
 # ------------------------------------------------------------------ 审计与任务

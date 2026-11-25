@@ -245,11 +245,12 @@ def test_urgent_handover_and_resolution(org, ref):
     assert "紧急·待补" not in out["flags"]
 
 
-def test_urgent_rejected_must_return(org, ref):
+def test_urgent_cannot_be_rejected_after_handover(org, ref):
+    """业务确认（2026-11-25）：先交接凭口头同意，未通过审核就不可能领到实物，交接后只能审核通过。"""
     req = make_req(org, ref, urgent=True, urgent_note="口头同意")
-    line = org.ok(org.post("keeper", f"/api/requisitions/{req['id']}/urgent-handover/{req['items'][0]['id']}"))
-    org.ok(org.post("lead_a", f"/api/requisitions/{req['id']}/decide", {"approve": False, "note": "不需要"}))
-    assert any(t["kind"] == "MUST_RETURN" and t["ref_id"] == line["id"] for t in org.ok(org.get("a1", "/api/todos")))
+    org.ok(org.post("keeper", f"/api/requisitions/{req['id']}/urgent-handover/{req['items'][0]['id']}"))
+    r = org.post("lead_a", f"/api/requisitions/{req['id']}/decide", {"approve": False, "note": "不需要"})
+    assert r.status_code == 400 and "只能审核通过" in r.json()["detail"]
 
 
 # ------------------------------------------------------------------ 审核时限

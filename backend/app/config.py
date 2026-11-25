@@ -33,14 +33,31 @@ def _database_url() -> str:
     return url.render_as_string(hide_password=False)
 
 
+# 示例文件里出现过的占位值：照抄这些上线等于没设密钥，任何人都能伪造登录凭证
+WEAK_JWT_SECRETS = {"dev-secret-change-me", "请改成一串随机字符", "changeme", "change-me", "secret"}
+
+
+def check_jwt_secret(secret: str) -> None:
+    """启动时校验登录凭证签名密钥：不能为空、不能是示例占位值、至少 16 位。不合格直接拒绝启动。"""
+    s = (secret or "").strip()
+    if not s or s in WEAK_JWT_SECRETS or s.startswith("请") or len(s) < 16:
+        raise RuntimeError("RMLM_JWT_SECRET 未设置、仍是示例值或少于 16 位：请在 .env 里改成一串随机字符"
+                           "（如 python -c \"import secrets;print(secrets.token_urlsafe(32))\"）后再启动")
+
+
 class Settings:
     def __init__(self) -> None:
         # ---------- 数据库（MySQL 8）
         self.database_url: str = _database_url()
 
         # ---------- 安全与登录
-        self.jwt_secret: str = _env("RMLM_JWT_SECRET", "dev-secret-change-me")
+        self.jwt_secret: str = _env("RMLM_JWT_SECRET")  # 启动时由 check_jwt_secret 校验
         self.jwt_hours: int = _int("RMLM_JWT_HOURS", 12)
+        # 密码登录连续输错多少次锁定、锁定多少分钟
+        self.login_max_fails: int = _int("RMLM_LOGIN_MAX_FAILS", 5)
+        self.login_lock_minutes: int = _int("RMLM_LOGIN_LOCK_MINUTES", 15)
+        # 开单数量允许超出申请数量的比例（%）：0 = 不允许超出（默认）；如光缆裁长常略多于申请，可设 5 / 10
+        self.over_issue_pct: int = _int("RMLM_OVER_ISSUE_PCT", 0)
 
         # ---------- 照片 / 静态文件
         self.photo_dir: Path = Path(_env("RMLM_PHOTO_DIR", "./data/photos")).resolve()

@@ -14,6 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .. import clock
+from ..config import settings
 from ..errors import BizError
 from ..models import ErpDoc, ErpLine, LedgerLine, Material, Project, ReqItem, Requisition, User
 from ..perms import require_role
@@ -147,7 +148,7 @@ def suggestions(db: Session) -> list[dict]:
                 for it in r.items:
                     if it.material_id != ln.material_id:
                         continue
-                    if issued_qty(db, it) + D(ln.qty) > D(it.qty):
+                    if issued_qty(db, it) >= D(it.qty) or issued_qty(db, it) + D(ln.qty) > issue_limit(it):
                         continue  # 已开够或这张单会超出申请数量：不作为建议
                     out.append({"erp_line_id": ln.id, "erp_doc_no": doc.no, "erp_line_no": ln.line_no,
                                 "req_item_id": it.id, "req_no": r.no, "qty": str(ln.qty)})
@@ -163,6 +164,11 @@ def issued_qty(db: Session, item: ReqItem) -> Decimal:
                                                                   LedgerLine.level == 1,
                                                                   LedgerLine.erp_line_id.is_not(None))))
     return sum((D(db.get(ErpLine, i).qty) for i in erp_ids), D(0))
+
+
+def issue_limit(item: ReqItem) -> Decimal:
+    """申请明细最多可开单的数量：申请数量 ×（1 + 允许超出比例 RMLM_OVER_ISSUE_PCT），默认不允许超出。"""
+    return D(D(item.qty) * (1 + Decimal(settings.over_issue_pct) / 100))
 
 
 def line_bound(db: Session, erp_line_id: int) -> bool:
@@ -197,7 +203,7 @@ def auto_bind(db: Session) -> int:
                 if issued >= D(it.qty):
                     continue  # 已开够申请数量；分批到货没开够的，下一张单仍可自动绑定
                 urgent = next((x for x in lines if x.urgent and x.erp_line_id is None), None)
-                if urgent is None and issued + D(ln.qty) > D(it.qty):
+                if urgent is None and issued + D(ln.qty) > issue_limit(it):
                     continue  # 这张单超出申请剩余数量：不自动绑定，24 小时后派"ERP 有单无明细"由领料专员核对
                 if r.status == "APPROVED" or urgent is not None:
                     cands.append(it)
@@ -243,11 +249,13 @@ def _bind(db: Session, op: User | None, item: ReqItem, erp: ErpLine) -> LedgerLi
         return urgent_lines[0]
     if req.status != "APPROVED":
         raise BizError("申请未经直属上级审核，不能开单")
-    rest = D(item.qty) - issued_qty(db, item)
-    if rest <= 0:
+    issued = issued_qty(db, item)
+    if issued >= D(item.qty):
         raise BizError(f"申请 {req.no} 的这项物料已开够申请数量 {D(item.qty)}，不能再绑定")
+    rest = issue_limit(item) - issued
     if D(erp.qty) > rest:
-        raise BizError(f"单据行数量 {D(erp.qty)} 超过申请剩余未开数量 {rest}：请在金蝶核对开单数量，"
+        pct = f"（含允许超出 {settings.over_issue_pct}%）" if settings.over_issue_pct else ""
+        raise BizError(f"单据行数量 {D(erp.qty)} 超过申请剩余可开数量 {rest}{pct}：请在金蝶核对开单数量，"
                        f"或由申请人补提申请")
     line = reqsvc._new_line(db, op, req, item, qty=erp.qty, erp_line=erp)
     close_todos(db, "erpline", erp.id)

@@ -394,7 +394,7 @@ def _done(db: Session, user: User, line: LedgerLine, extra: dict | None = None) 
 @router.post("/lines/{lid}/sign")
 def sign(lid: int, body: SignIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
     line = _line(db, user, lid)
-    lines = lineops.sign(db, line, user, check_photos(db, body.photos), body.codes, note=body.note)
+    lines = lineops.sign(db, line, user, check_photos(db, body.photos, user), body.codes, note=body.note)
     return _done(db, user, line, {"lines": [{"id": l.id, "code": l.code, "qty": s(l.qty)} for l in lines]}
                  if len(lines) > 1 else None)
 
@@ -404,7 +404,7 @@ def batch_sign(body: BatchSignIn, user: User = Depends(current_user), db: Sessio
     """整单批量签收：一人领整单时一次确认本人名下、同一张已过账单据上的多条待签收行。"""
     for lid in body.line_ids:
         _line(db, user, lid)
-    lines = lineops.batch_sign(db, body.line_ids, user, check_photos(db, body.photos), body.codes, note=body.note)
+    lines = lineops.batch_sign(db, body.line_ids, user, check_photos(db, body.photos, user), body.codes, note=body.note)
     db.flush()
     return {"signed": len(lines), "lines": [{"id": l.id, "code": l.code, "qty": s(l.qty)} for l in lines]}
 
@@ -430,7 +430,7 @@ def wms_barcode(code: str, user: User = Depends(current_user), db: Session = Dep
 def consume(lid: int, body: ConsumeIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
     line = _line(db, user, lid)
     lineops.consume(db, line, user, body.qty, body.dest, body.is_loss, body.loss_reason, body.note,
-                    check_photos(db, body.photos), ship_no=body.ship_no, location_id=body.location_id)
+                    check_photos(db, body.photos, user), ship_no=body.ship_no, location_id=body.location_id)
     return _done(db, user, line)
 
 
@@ -438,14 +438,14 @@ def consume(lid: int, body: ConsumeIn, user: User = Depends(current_user), db: S
 def split(lid: int, body: SplitIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
     line = _line(db, user, lid)
     res = lineops.split(db, line, user, body.pieces, body.loss_qty, body.loss_reason, body.note,
-                        check_photos(db, body.photos))
+                        check_photos(db, body.photos, user))
     return _done(db, user, line, res)
 
 
 @router.post("/lines/{lid}/hold")
 def hold(lid: int, body: LocIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
     line = _line(db, user, lid)
-    lineops.hold(db, line, user, body.location_id, body.note, check_photos(db, body.photos), dest=body.dest,
+    lineops.hold(db, line, user, body.location_id, body.note, check_photos(db, body.photos, user), dest=body.dest,
                  location_text=body.location_text)
     return _done(db, user, line)
 
@@ -453,7 +453,7 @@ def hold(lid: int, body: LocIn, user: User = Depends(current_user), db: Session 
 @router.post("/lines/{lid}/move")
 def move(lid: int, body: LocIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
     line = _line(db, user, lid)
-    lineops.move(db, line, user, body.location_id, body.note, check_photos(db, body.photos),
+    lineops.move(db, line, user, body.location_id, body.note, check_photos(db, body.photos, user),
                  location_text=body.location_text)
     return _done(db, user, line)
 
@@ -501,7 +501,7 @@ class ConclusionIn(PhotoIn):
 def conclusion(eid: int, body: ConclusionIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
     ev = get_or_404(db, Event, eid, "事件")
     line = _line(db, user, ev.line_id)
-    lineops.conclusion(db, ev, user, body.text, check_photos(db, body.photos) if body.photos else None)
+    lineops.conclusion(db, ev, user, body.text, check_photos(db, body.photos, user) if body.photos else None)
     return _done(db, user, line)
 
 
@@ -524,21 +524,21 @@ def transfer_decide(eid: int, accept: bool, user: User = Depends(current_user), 
 @router.post("/lines/{lid}/return")
 def return_(lid: int, body: QtyIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
     line = _line(db, user, lid)
-    lineops.return_(db, line, user, body.qty, body.note, check_photos(db, body.photos))
+    lineops.return_(db, line, user, body.qty, body.note, check_photos(db, body.photos, user))
     return _done(db, user, line)
 
 
 @router.post("/lines/{lid}/scrap")
 def scrap(lid: int, body: ScrapIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
     line = _line(db, user, lid)
-    lineops.scrap(db, line, user, body.mode, body.qty, body.reason, body.box, body.note, check_photos(db, body.photos))
+    lineops.scrap(db, line, user, body.mode, body.qty, body.reason, body.box, body.note, check_photos(db, body.photos, user))
     return _done(db, user, line)
 
 
 @router.post("/lines/{lid}/qconfirm")
 def qconfirm(lid: int, body: PhotoIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
     line = _line(db, user, lid)
-    lineops.quarter_confirm(db, line, user, body.note, check_photos(db, body.photos))
+    lineops.quarter_confirm(db, line, user, body.note, check_photos(db, body.photos, user))
     return _done(db, user, line)
 
 

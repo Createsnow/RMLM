@@ -105,17 +105,16 @@ def decide(db: Session, op: User, req: Requisition, approve: bool, note: str | N
         raise forbid("您不是该申请的审核人")
     if not approve and not (note or "").strip():
         raise BizError("驳回请填写原因")
+    if not approve and req.urgent and db.scalar(select(LedgerLine.id).where(LedgerLine.requisition_id == req.id).limit(1)):
+        # 业务确认（2026-11-25）：先交接是凭审核人的口头同意，未通过审核就不可能领到实物，所以交接后只能通过
+        raise BizError("该紧急申请已凭口头同意先交接了物料，只能审核通过；如有异议，请先与领料专员、使用人核实处理")
     req.status = "APPROVED" if approve else "REJECTED"
     req.decided_by, req.decided_as, req.decided_at, req.decision_note = op.id, cap, clock.now(), note
     close_todos(db, "req", req.id, ("APPROVE",))
     notify(db, req.user_id, f"领料申请 {req.no} 已{'通过' if approve else '驳回'}", "req", req.id)
-    lines = list(db.scalars(select(LedgerLine).where(LedgerLine.requisition_id == req.id)))
-    if approve:
-        for l in lines:
+    if approve:  # 已交接的紧急申请只能通过（见上），驳回时不会有领用行
+        for l in db.scalars(select(LedgerLine).where(LedgerLine.requisition_id == req.id)):
             refresh_urgent(db, l)
-    else:
-        for l in lines:  # 紧急领用已交接、补审被驳回 → 全额退库
-            add_todo(db, l.holder_id, "MUST_RETURN", f"申请被驳回，{l.code} 须全额退库", "line", l.id, due_hours=24)
     return req
 
 

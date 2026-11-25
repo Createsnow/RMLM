@@ -2,6 +2,7 @@
 
 不依赖 Redis：多实例部署时用 MySQL GET_LOCK 保证同一时刻只有一个实例在跑。
 """
+import logging
 from datetime import datetime, time, timedelta
 
 from sqlalchemy import select, text
@@ -13,6 +14,8 @@ from ..perms import active_delegates, default_approver
 from . import disposal, doc_sync, erp, ledger, master_sync, recon, wecom
 from .common import add_todo, notify, period_of, quarter_of, users_with_role
 
+log = logging.getLogger("rmlm.jobs")
+
 
 def _manager_or_head(db: Session, user_id: int) -> int | None:
     u = db.get(User, user_id)
@@ -22,21 +25,42 @@ def _manager_or_head(db: Session, user_id: int) -> int | None:
     return heads[0].id if heads and heads[0].id != user_id else None
 
 
+# ------------------------------------------------------------------ 单步隔离
+# 每一步在自己的保存点里执行：某一步出错只回滚这一步、给管理员派待办，其余步骤和每日 / 每周等执行标记照常
+# （原来任何一步抛错，整次巡检全部回滚，连"今天已跑过"的标记也回滚，某一步持续出错时每日任务永远跑不成）。
+STEPS = {
+    "push": "企微推送补发", "doc_sync": "拉取金蝶单据", "auto_bound": "自动生成领用行", "approve": "审核提醒与升级",
+    "urgent": "紧急领用 24 小时检查", "unbound": "ERP 有单无明细", "escalate_todo": "待办升级", "locked": "结存异常锁行",
+    "recon": "每日对账", "material_sync": "金蝶物料同步", "contact_sync": "企微通讯录同步", "lab": "D02 实验结论预警",
+    "overdue": "超期与冻结", "lapsed": "长周期季度确认过期", "weekly": "报废批次", "quarterly": "季度任务",
+    "monthly": "关账提醒",
+}
+
+
+def _step(db: Session, key: str, fn, *args):
+    try:
+        with db.begin_nested():
+            return fn(db, *args)
+    except Exception as e:  # noqa: BLE001  单步失败不影响其他步骤
+        log.exception("job step %s failed", key)
+        msg = f"定时任务「{STEPS.get(key, key)}」出错：{str(e)[:150]}"
+        for a in users_with_role(db, "ADMIN"):
+            add_todo(db, a.id, "JOB_FAIL", msg, "jobstep", list(STEPS).index(key) if key in STEPS else 0, dedupe=True)
+        return {"error": str(e)[:200]}
+
+
 # ------------------------------------------------------------------ 每 15 分钟
-def quarter_hour(db: Session) -> dict:
+def _approvals(db: Session) -> dict:
+    """审核：4 小时提醒，24 小时升级上一级。"""
     now = clock.now()
-    stats = {"remind": 0, "escalate": 0, "urgent": 0, "unbound": 0, "todo_l2": 0, "todo_l3": 0, "locked": 0,
-             "push": wecom.retry_pending(db),
-             # 0. 拉金蝶单据；按申请号自动生成领用行（含申请晚于单据审核通过的情况）
-             "doc_sync": doc_sync.quarter_sync(db), "auto_bound": erp.auto_bind(db)}
-    # 1. 审核：4 小时提醒，24 小时升级上一级
+    out = {"remind": 0, "escalate": 0}
     for req in db.scalars(select(Requisition).where(Requisition.status == "PENDING")):
         age = now - req.created_at
         if age >= timedelta(hours=4) and req.escalation == 0:
             req.escalation = 1
             for uid in [req.approver_id, *active_delegates(db, req.approver_id)]:
                 notify(db, uid, f"领料申请 {req.no} 已超过 4 小时未审核，请尽快处理", "req", req.id)
-            stats["remind"] += 1
+            out["remind"] += 1
         if age >= timedelta(hours=24) and req.escalation < 2:
             req.escalation = 2
             approver = db.get(User, req.approver_id)
@@ -52,8 +76,14 @@ def quarter_hour(db: Session) -> dict:
             if up:
                 req.escalated_to_id = up
                 add_todo(db, up, "APPROVE", f"【升级】领料申请 {req.no} 超 24 小时未审核", "req", req.id, level=2)
-            stats["escalate"] += 1
-    # 2. 紧急领用 24 小时未补齐
+            out["escalate"] += 1
+    db.flush()
+    return out
+
+
+def _urgent(db: Session) -> int:
+    """紧急领用 24 小时未补齐。"""
+    now, n = clock.now(), 0
     for line in db.scalars(select(LedgerLine).where(LedgerLine.urgent.is_(True), LedgerLine.urgent_resolved.is_(False),
                                                     LedgerLine.urgent_overdue.is_(False))):
         if line.urgent_deadline and line.urgent_deadline < now:
@@ -65,8 +95,14 @@ def quarter_hour(db: Session) -> dict:
                 notify(db, mgr, f"紧急领用 {line.code} 超 24 小时未补齐", "line", line.id)
             for k in users_with_role(db, "KEEPER"):
                 add_todo(db, k.id, "URGENT_PENDING", f"紧急领用 {line.code} 待补 ERP 单", "line", line.id, dedupe=True)
-            stats["urgent"] += 1
-    # 3. ERP 有单无明细：24 小时内补登
+            n += 1
+    db.flush()
+    return n
+
+
+def _unbound(db: Session) -> int:
+    """ERP 有单无明细：24 小时内补登。"""
+    now, n = clock.now(), 0
     for ln, doc in db.execute(select(ErpLine, ErpDoc).join(ErpDoc).where(ErpDoc.doc_type.in_(("LL", "AB")),
                                                                           ErpDoc.posted.is_(True), ErpLine.qty > 0)):
         if doc.created_at < now - timedelta(hours=24) and not db.scalar(
@@ -75,8 +111,15 @@ def quarter_hour(db: Session) -> dict:
             for k in users_with_role(db, "KEEPER"):
                 if add_todo(db, k.id, "ERP_UNBOUND", f"ERP 有单无明细：{doc.no} 第 {ln.line_no} 行，请补登",
                             "erpline", ln.id, dedupe=True):
-                    stats["unbound"] += 1
-    # 4. 通用升级：48 小时未处理 → 直属上级；连续 3 天未关闭 → 月度经营会挂账
+                    n += 1
+    db.flush()
+    return n
+
+
+def _escalate_todos(db: Session) -> dict:
+    """通用升级：48 小时未处理 → 直属上级；连续 3 天未关闭 → 月度经营会挂账。"""
+    now = clock.now()
+    out = {"todo_l2": 0, "todo_l3": 0}
     for t in db.scalars(select(Todo).where(Todo.state == "OPEN", Todo.is_notice.is_(False), Todo.level == 1,
                                            Todo.kind != "APPROVE")):
         age = now - t.created_at
@@ -86,34 +129,57 @@ def quarter_hour(db: Session) -> dict:
             if mgr:
                 owner = db.get(User, t.user_id)
                 add_todo(db, mgr, t.kind, f"【二级】{owner.name}：{t.title}", t.ref_type, t.ref_id, level=2, parent_id=t.id)
-            stats["todo_l2"] += 1
+            out["todo_l2"] += 1
         if age >= timedelta(days=3) and t.escalated < 2:
             t.escalated = 2
             for vp in users_with_role(db, "VP"):
                 notify(db, vp.id, f"【三级挂账】{t.title}", t.ref_type, t.ref_id)
-            stats["todo_l3"] += 1
-    # 5. 结存异常锁行
+            out["todo_l3"] += 1
+    db.flush()
+    return out
+
+
+def _lock_abnormal(db: Session) -> int:
+    """结存异常锁行。"""
+    n = 0
     lines = list(db.scalars(select(LedgerLine).where(LedgerLine.locked.is_(False), LedgerLine.voided.is_(False))))
+    calcs = ledger.load(db, lines)
     for line in lines:
-        c = ledger.load_one(db, line)
+        c = calcs[line.id]
         if c.balance < 0 or c.balance > line.qty:
             line.locked, line.lock_reason = True, f"结存异常（{c.balance}）"
             for a in users_with_role(db, "ADMIN"):
                 add_todo(db, a.id, "LOCKED_LINE", f"结存异常已锁行：{line.code}，48 小时内修正", "line", line.id,
                          due_hours=48)
-            stats["locked"] += 1
+            n += 1
+    db.flush()
+    return n
+
+
+def quarter_hour(db: Session) -> dict:
+    stats: dict = {
+        "push": _step(db, "push", wecom.retry_pending),
+        # 拉金蝶单据；按申请号自动生成领用行（含申请晚于单据审核通过的情况）
+        "doc_sync": _step(db, "doc_sync", doc_sync.quarter_sync),
+        "auto_bound": _step(db, "auto_bound", lambda d: erp.auto_bind(d)),
+    }
+    appr = _step(db, "approve", _approvals)
+    stats.update(appr if "error" not in appr else {"remind": appr, "escalate": appr})
+    stats["urgent"] = _step(db, "urgent", _urgent)
+    stats["unbound"] = _step(db, "unbound", _unbound)
+    esc = _step(db, "escalate_todo", _escalate_todos)
+    stats.update(esc if "error" not in esc else {"todo_l2": esc, "todo_l3": esc})
+    stats["locked"] = _step(db, "locked", _lock_abnormal)
     db.flush()
     return stats
 
 
 # ------------------------------------------------------------------ 每天
-def daily(db: Session) -> dict:
-    now, today = clock.now(), clock.today()
-    stats = {"recon": recon.run(db), "overdue": 0, "frozen": 0, "renew": 0, "lapsed": 0, "project": 0, "lab": 0,
-             "material_sync": master_sync.daily_sync(db), "contact_sync": wecom.daily_sync(db)}
-    # D02 可靠性实验：送实验室超过 30 天未回填结论 → 预警待办（48 小时未处理按通用规则升级直属上级）
+def _lab(db: Session) -> int:
+    """D02 可靠性实验：送实验室超过 30 天未回填结论 → 预警待办（48 小时未处理按通用规则升级直属上级）。"""
     from .lineops import LAB_CONCLUSION_DAYS, lab_pending
 
+    now, n = clock.now(), 0
     for e in lab_pending(db):
         if e.created_at < now - timedelta(days=LAB_CONCLUSION_DAYS):
             line = db.get(LedgerLine, e.line_id)
@@ -122,7 +188,15 @@ def daily(db: Session) -> dict:
             if add_todo(db, line.holder_id, "LAB_CONCLUSION",
                         f"{line.code} 送可靠性实验已超 {LAB_CONCLUSION_DAYS} 天未回填结论，请补填", "line", line.id,
                         dedupe=True):
-                stats["lab"] += 1
+                n += 1
+    db.flush()
+    return n
+
+
+def _overdue(db: Session) -> dict:
+    """超期待办与冻结、长周期到期提醒、项目结项检查。"""
+    now, today = clock.now(), clock.today()
+    out = {"overdue": 0, "frozen": 0, "renew": 0, "project": 0}
     lines = list(db.scalars(select(LedgerLine).where(LedgerLine.signed.is_(True), LedgerLine.voided.is_(False))))
     calcs = ledger.load(db, lines)
     for line in lines:
@@ -132,7 +206,7 @@ def daily(db: Session) -> dict:
         if ledger.is_overdue(line, c, today):
             add_todo(db, line.holder_id, "OVERDUE", f"{line.code} 已超过预计归还日，请退库、报废或申请改归还日",
                      "line", line.id, dedupe=True)
-            stats["overdue"] += 1
+            out["overdue"] += 1
             standard = (not line.long_cycle) or line.long_cycle_lapsed
             idle_since = c.last_action_at or line.created_at
             holder = db.get(User, line.holder_id)
@@ -147,18 +221,24 @@ def daily(db: Session) -> dict:
                 if holder.manager_id:
                     add_todo(db, holder.manager_id, "UNFREEZE", f"{holder.name} 已被冻结新领用，请处理后解冻",
                              "user", holder.id, dedupe=True)
-                stats["frozen"] += 1
+                out["frozen"] += 1
         if line.long_cycle and line.long_cycle_max and (line.long_cycle_max - today).days <= 30:
             if add_todo(db, line.holder_id, "RENEW_REMIND",
                         f"长周期物料 {line.code} 将于 {line.long_cycle_max} 到达最长期限，请续期或处置",
                         "line", line.id, dedupe=True):
-                stats["renew"] += 1
+                out["renew"] += 1
         project = db.get(Project, line.project_id)
         if project.closed:
             if add_todo(db, line.holder_id, "PROJECT_CLOSED", f"项目 {project.code} 已结项，{line.code} 须清零",
                         "line", line.id, dedupe=True):
-                stats["project"] += 1
-    # 长周期季度确认：季末 7 天内未确认 → 按标准类处理
+                out["project"] += 1
+    db.flush()
+    return out
+
+
+def _lapsed(db: Session) -> int:
+    """长周期季度确认：季末 7 天内未确认 → 按标准类处理。"""
+    now, n = clock.now(), 0
     for t in db.scalars(select(Todo).where(Todo.kind == "QCONFIRM", Todo.state == "OPEN", Todo.due_at < now)):
         line = db.get(LedgerLine, t.ref_id)
         if line and ledger.load_one(db, line).balance <= 0:
@@ -168,7 +248,21 @@ def daily(db: Session) -> dict:
         if line and not line.long_cycle_lapsed:
             line.long_cycle_lapsed = True
             notify(db, line.holder_id, f"{line.code} 未按期做季度在用确认，已按标准类超期规则处理", "line", line.id)
-            stats["lapsed"] += 1
+            n += 1
+    db.flush()
+    return n
+
+
+def daily(db: Session) -> dict:
+    stats: dict = {
+        "recon": _step(db, "recon", recon.run),
+        "material_sync": _step(db, "material_sync", master_sync.daily_sync),
+        "contact_sync": _step(db, "contact_sync", wecom.daily_sync),
+        "lab": _step(db, "lab", _lab),
+    }
+    od = _step(db, "overdue", _overdue)
+    stats.update(od if "error" not in od else {"overdue": od})
+    stats["lapsed"] = _step(db, "lapsed", _lapsed)
     db.flush()
     return stats
 
@@ -230,11 +324,11 @@ def tick(db: Session) -> dict:
         out["daily"] = daily(db)
     y, w, _ = today.isocalendar()
     if _due(db, "weekly", f"{y}-W{w:02d}"):
-        out["weekly"] = weekly(db)
+        out["weekly"] = _step(db, "weekly", weekly)
     if _due(db, "quarterly", quarter_of(today)):
-        out["quarterly"] = quarterly(db)
+        out["quarterly"] = _step(db, "quarterly", quarterly)
     if _due(db, "monthly", period_of(today)):
-        out["monthly"] = monthly(db)
+        out["monthly"] = _step(db, "monthly", monthly)
     return out
 
 
