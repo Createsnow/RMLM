@@ -6,7 +6,8 @@
 - 金蝶里删掉的行，镜像里数量置 0（保留历史引用），由对账发现差额；
 - 已关账月份的单据在金蝶里被改，不改镜像，派待办给领料专员和管理员；
 - 增量：按金蝶"修改日期"，水位记在 job_run（k3_docs），下次从水位往前回退 10 分钟再拉，避免漏单；
-- 单据表单（字段映射）在 k3cloud.K3CloudReader.fetch_docs 里实现；未实现前定时任务直接跳过。
+- 研发领料 = 其他出库单中单据类型为"研发测试其他出库单"的（K3_LL_BILL_TYPES），在 k3cloud.K3CloudReader.fetch_docs；
+- 退料 / 报废单不批量拉，领料专员分摊时按单号取（fetch_one）；A 转 B、调整单一期不接，手工录入 / Excel 导入。
 """
 from __future__ import annotations
 
@@ -160,6 +161,38 @@ def sync_docs(db: Session, full: bool = False, reader=None) -> dict:
     jr.last_result = json.dumps(stats, ensure_ascii=False)
     db.flush()
     return stats
+
+
+def fetch_one(db: Session, bill_no: str, doc_type: str, reader=None) -> ErpDoc:
+    """按单号从金蝶取一张退料 / 报废单写进单据镜像（领料专员分摊时用，不用先录入或导入）。
+    中台已有这张单就按金蝶最新内容更新。"""
+    if doc_type not in ("TL", "BF"):
+        raise BizError("按单号取单只用于退料单 / 报废单")
+    no = (bill_no or "").strip()
+    if not no:
+        raise BizError("请输入金蝶单号")
+    have = db.scalar(select(ErpDoc).where(ErpDoc.no == no))
+    if have is not None and have.doc_type != doc_type:
+        raise BizError(f"单据 {no} 在中台已登记为其他类型（{have.doc_type}），请核对单号")
+    own = reader is None
+    reader = reader or make_reader()
+    try:
+        row = reader.fetch_doc(no, doc_type)
+    finally:
+        if own and hasattr(reader, "close"):
+            reader.close()
+    if row is None:
+        raise BizError(f"金蝶里查不到单据 {no}（只取库存组织 {settings.k3_use_org} 已审核或重新审核的单据）")
+    if not row.get("lines"):
+        raise BizError(f"金蝶单据 {no} 没有明细")
+    data = {**row, "no": no, "doc_type": doc_type}
+    if isinstance(data.get("doc_date"), (date, datetime)):
+        data["doc_date"] = (data["doc_date"].date() if isinstance(data["doc_date"], datetime)
+                            else data["doc_date"]).isoformat()
+    if have is None:
+        return erp.save_doc(db, None, data, source="API")
+    _update(db, have, data)
+    return have
 
 
 def quarter_sync(db: Session) -> dict | None:

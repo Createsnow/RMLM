@@ -18,7 +18,11 @@
       <el-col :md="9" :xs="24" v-if="hasRole('KEEPER')">
         <div class="card">
           <h3>匹配金蝶退料单</h3>
-          <div class="muted" style="margin-bottom: 8px">先在金蝶合并开退料单，录入 / 导入到「ERP 单据」后在此选择。</div>
+          <div class="muted" style="margin-bottom: 8px">先在金蝶合并开退料单，再输入单号从金蝶取回（接口未配置时到「ERP 单据」录入 / 导入）。</div>
+          <div style="display: flex; gap: 6px; margin-bottom: 8px">
+            <el-input v-model="fetchNo" placeholder="金蝶退料单号，如 QTRK…" @keyup.enter="fetchDoc" />
+            <el-button :loading="fetching" :disabled="!fetchNo.trim()" @click="fetchDoc">从金蝶取单</el-button>
+          </div>
           <el-select v-model="docId" filterable placeholder="选择退料入库单" style="width: 100%">
             <el-option v-for="d in docs" :key="d.id" :value="d.id" :label="`${d.no}（${d.lines.map(l => l.material + '×' + l.qty).join('，')}）`" />
           </el-select>
@@ -35,6 +39,7 @@
 <script setup>
 defineProps({ embedded: Boolean })
 import { computed, onMounted, ref } from 'vue'
+import { ElMessage } from 'element-plus'
 import { api } from '../api'
 import { hasRole } from '../store'
 
@@ -43,6 +48,19 @@ const sel = ref([])
 const docs = ref([])
 const docId = ref(null)
 const result = ref(null)
+const fetchNo = ref('')
+const fetching = ref(false)
+async function fetchDoc() {
+  fetching.value = true
+  try {
+    const d = await api.post('/api/erp/docs/fetch', { no: fetchNo.value.trim(), doc_type: 'TL' })
+    if (!d.posted) ElMessage.warning(`${d.no} 在金蝶尚未审核，审核后才能分摊`)
+    else ElMessage.success(`已取回 ${d.no}`)
+    await load()
+    docId.value = d.id
+    fetchNo.value = ''
+  } finally { fetching.value = false }
+}
 const selSum = computed(() => +sel.value.reduce((a, r) => a + +r.rest, 0).toFixed(3))
 async function load() {
   rows.value = await api.get('/api/returns/pending')

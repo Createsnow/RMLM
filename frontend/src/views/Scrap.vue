@@ -18,6 +18,10 @@
     </div>
     <div class="card">
       <h3>批次</h3>
+      <div v-if="hasRole('KEEPER')" style="display: flex; gap: 6px; margin-bottom: 10px; max-width: 460px">
+        <el-input v-model="fetchNo" placeholder="金蝶报废单号，取回后可在下面选择" @keyup.enter="fetchDoc" />
+        <el-button :loading="fetching" :disabled="!fetchNo.trim()" @click="fetchDoc">从金蝶取单</el-button>
+      </div>
       <el-table :data="batches" size="small">
         <el-table-column prop="no" label="批次号" width="170" />
         <el-table-column prop="box" label="箱号" width="80" />
@@ -51,6 +55,18 @@ const pending = ref([])
 const batches = ref([])
 const docs = ref([])
 const pick = reactive({})
+const fetchNo = ref('')
+const fetching = ref(false)
+async function fetchDoc() {
+  fetching.value = true
+  try {
+    const d = await api.post('/api/erp/docs/fetch', { no: fetchNo.value.trim(), doc_type: 'BF' })
+    if (!d.posted) ElMessage.warning(`${d.no} 在金蝶尚未审核，审核后才能核销`)
+    else ElMessage.success(`已取回 ${d.no}，请在批次里选择`)
+    fetchNo.value = ''
+    load()
+  } finally { fetching.value = false }
+}
 async function load() {
   pending.value = await api.get('/api/scrap/pending')
   batches.value = await api.get('/api/scrap/batches')

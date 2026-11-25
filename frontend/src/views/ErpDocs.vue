@@ -9,6 +9,7 @@
       </el-select>
       <el-input v-model="q" placeholder="单据号 / 备注" clearable style="width: 180px" @change="load" />
       <template v-if="hasRole('KEEPER', 'ADMIN')">
+        <el-button v-if="hasRole('KEEPER','ADMIN')" :loading="syncing" @click="syncK3">从金蝶同步领料单</el-button>
         <el-button type="primary" @click="openNew"><el-icon><Plus /></el-icon>录入单据</el-button>
         <el-upload :show-file-list="false" :http-request="doImport" accept=".xlsx"><el-button><el-icon><Upload /></el-icon>Excel 导入</el-button></el-upload>
       </template>
@@ -88,6 +89,15 @@ const type = ref('')
 const q = ref('')
 const dlg = ref(false)
 const f = reactive({})
+const syncing = ref(false)
+async function syncK3() {
+  syncing.value = true
+  try {
+    const r = await api.post('/api/erp/docs/sync')
+    ElMessage[r.errors?.length ? 'warning' : 'success'](`金蝶领料单：取回 ${r.fetched}，新增 ${r.created}，更新 ${r.updated}，自动生成领用行 ${r.auto_bound}${r.errors?.length ? `，跳过 ${r.errors.length} 张（已派待办）` : ''}`)
+    load()
+  } finally { syncing.value = false }
+}
 async function load() { rows.value = await api.get(`/api/erp/docs?doc_type=${type.value || ''}&q=${encodeURIComponent(q.value)}`) }
 function openNew() {
   Object.assign(f, { no: '', doc_type: 'LL', doc_date: today(), posted: true, remark: '', ref_doc_no: '', lines: [{ material_code: '', qty: '' }] })

@@ -210,8 +210,88 @@ def material_row(r: dict) -> dict:
     }
 
 
+# ------------------------------------------------------------------ 单据
+# 研发领料 = 其他出库单 STK_MisDelivery 中单据类型为"研发测试其他出库单"（K3_LL_BILL_TYPES）的单据，定时批量拉；
+# 退料 / 报废单不批量拉（全公司的其他入库、其他出库单太多，也不必区分类型）：领料专员在中台分摊时输入金蝶单号，
+# 按单号取这一张（fetch_doc）。A 转 B 单、调整单一期不接，继续手工录入 / Excel 导入。
+MIS_OUT = "STK_MisDelivery"  # 其他出库单，单号 QTCK 开头
+MIS_IN = "STK_MISCELLANEOUS"  # 其他入库单，单号 QTRK 开头
+DOC_FIELDS = {
+    # 顺序即返回列顺序；两张表单的元数据字段名大小写不同，金蝶查询不区分大小写，这里按各自文档写
+    MIS_OUT: ("FBillNo", "FDate", "FDocumentStatus", "FCancelStatus", "FNote", "F_ora_xmbm", "FModifyDate",
+              "FBillTypeID.FName", "FEntity_FEntryId", "FEntity_FSeq", "FMaterialId.FNumber", "FBaseQty", "FPrice",
+              "FProjectNo"),
+    MIS_IN: ("FBillNo", "FDate", "FDocumentStatus", "FCANCELSTATUS", "FNOTE", "FModifyDate", "FBillTypeID.FName",
+             "FEntity_FEntryId", "FEntity_FSeq", "FMATERIALID.FNumber", "FBaseQty", "FPrice", "FProjectNo"),
+}
+# 已审核 C 算过账；重新审核 D（反审核后在改）也要拉回来，用来把中台镜像置为未过账
+DOC_STATUSES = ("C", "D")
+
+
+def _quote(v: str) -> str:
+    return "'" + v.replace("'", "''") + "'"
+
+
+def doc_filter(org: str, bill_types: list[str], since: datetime | None, bill_no: str = "") -> str:
+    parts = ["FDocumentStatus IN ('C','D')"]
+    if org:
+        parts.append(f"FStockOrgId.FNumber={_quote(org)}")
+    if bill_types:
+        names = ",".join(_quote(t) for t in bill_types)
+        parts.append(f"(FBillTypeID.FName IN ({names}) OR FBillTypeID.FNumber IN ({names}))")
+    if since is not None:
+        parts.append(f"FModifyDate>='{since.strftime('%Y-%m-%d %H:%M:%S')}'")
+    if bill_no:
+        parts.append(f"FBillNo={_quote(bill_no)}")
+    return " AND ".join(parts)
+
+
+def _num(v):
+    s = _text(v)
+    try:
+        return float(s) if s else 0.0
+    except ValueError:
+        return 0.0
+
+
+def merge_doc_rows(rows: list[dict], doc_type: str) -> list[dict]:
+    """全查是一行一条明细：所有页取完后按单据号合并成单（ErpReader.fetch_docs 的格式）。
+    数量取基本单位数量（中台物料单位就是金蝶基本单位）；成本价为 0 视为没有单价；项目号先取行上的项目编号，
+    没有再取表头项目编码；作废的单据视为未过账。"""
+    docs: dict[str, dict] = {}
+    for r in rows:
+        no = _text(r.get("FBillNo"))
+        if not no:
+            continue
+        status = _text(r.get("FDocumentStatus"))
+        cancelled = _text(r.get("FCancelStatus") or r.get("FCANCELSTATUS")) == "B"
+        d = docs.get(no)
+        if d is None:
+            dt = _parse_dt(r.get("FDate"))
+            d = docs[no] = {
+                "no": no, "doc_type": doc_type, "doc_date": dt.date() if dt else None,
+                "posted": status == "C" and not cancelled,
+                "remark": _text(r.get("FNote") or r.get("FNOTE")) or None, "ref_doc_no": None,
+                "modified_at": _parse_dt(r.get("FModifyDate")), "bill_type": _text(r.get("FBillTypeID.FName")),
+                "lines": [],
+            }
+        seq = _text(r.get("FEntity_FSeq"))
+        if not seq.isdigit() or int(seq) <= 0:
+            continue  # 没有明细的单据：全查返回的明细列为空
+        price = _num(r.get("FPrice"))
+        project = _text(r.get("FProjectNo")) or _text(r.get("F_ora_xmbm")) or None
+        d["lines"].append({
+            "line_no": int(seq),
+            "material_code": _text(r.get("FMaterialId.FNumber") or r.get("FMATERIALID.FNumber")),
+            # 退货方向的其他出库单数量可能为负，中台单据行只记绝对值
+            "qty": abs(_num(r.get("FBaseQty"))), "unit_price": price if price > 0 else None,
+            "project_code": project, "ref_line_no": None,
+        })
+    return list(docs.values())
+
+
 class K3CloudReader:
-    """ErpReader 的金蝶云星空实现。目前只接物料档案；项目档案与单据的表单待业务确认。"""
+    """ErpReader 的金蝶云星空实现：物料档案、研发领料单（批量）、退料 / 报废单（按单号）。项目档案的表单待确认。"""
 
     def __init__(self, client: K3Client | None = None, use_org: str | None = None) -> None:
         self.client = client or K3Client()
@@ -229,6 +309,24 @@ class K3CloudReader:
         raise NotImplementedError("项目档案在金蝶中的表单尚未确认，暂用 Excel 导入")
 
     def fetch_docs(self, since: datetime | None = None) -> list[dict]:
-        # 待金蝶管理员确认：研发领料 / 退料 / 报废 / A 转 B / 调整单各用哪个表单，以及单号、行号、物料编码、
-        # 数量、单价、项目、备注（申请号）、审核状态、修改日期的字段。确认后在这里按 ErpReader 的格式返回。
-        raise NotImplementedError("金蝶单据表单尚未确认，暂不能自动拉取单据")
+        """研发领料：其他出库单里单据类型为研发领料的（已审核 / 重新审核），按修改日期增量。"""
+        if not settings.k3_ll_bill_types:
+            raise NotImplementedError("未配置研发领料的单据类型（K3_LL_BILL_TYPES），不能自动拉取领料单")
+        rows = self.client.query(MIS_OUT, DOC_FIELDS[MIS_OUT],
+                                 doc_filter(self.use_org, settings.k3_ll_bill_types, since),
+                                 "FBillNo ASC, FEntity_FEntryId ASC")
+        return merge_doc_rows(rows, "LL")
+
+    def fetch_doc(self, bill_no: str, doc_type: str) -> dict | None:
+        """按单号取一张退料（TL）/ 报废（BF）单，不限单据类型：QTRK 开头查其他入库单、QTCK 开头查其他出库单，
+        都不是就两张表单各查一次。没找到返回 None。"""
+        no = bill_no.strip()
+        forms = ([MIS_IN] if no.upper().startswith("QTRK") else [MIS_OUT] if no.upper().startswith("QTCK")
+                 else [MIS_IN, MIS_OUT])
+        for form in forms:
+            rows = self.client.query(form, DOC_FIELDS[form], doc_filter(self.use_org, [], None, no),
+                                     "FEntity_FEntryId ASC")
+            docs = merge_doc_rows(rows, doc_type)
+            if docs:
+                return docs[0]
+        return None

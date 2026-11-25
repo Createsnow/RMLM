@@ -199,6 +199,27 @@ def erp_doc_sync(full: bool = False, user: User = Depends(current_user), db: Ses
     return out
 
 
+class FetchDocIn(BaseModel):
+    no: str
+    doc_type: str  # TL 退料 / BF 报废
+
+
+@router.post("/erp/docs/fetch")
+def erp_doc_fetch(body: FetchDocIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """按金蝶单号取一张退料 / 报废单（分摊、批次核销前用，不用先录入）。"""
+    require_role(user, "KEEPER", "ADMIN")
+    from ..config import settings
+
+    if not settings.k3_enabled:
+        raise BizError("未配置金蝶接口，请在「ERP 单据」手工录入或导入")
+    try:
+        doc = doc_sync.fetch_one(db, body.no, body.doc_type)
+    except K3Error as e:
+        raise BizError(str(e), 502)
+    db.flush()
+    return erp_doc_out(db, doc)
+
+
 @router.get("/erp/suggestions")
 def suggestions(user: User = Depends(current_user), db: Session = Depends(get_db)):
     require_role(user, "KEEPER")

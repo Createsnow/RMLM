@@ -28,10 +28,12 @@ class ErpReader(Protocol):
     fetch_materials 每行：code, name, spec, unit, category, erp_id, forbidden(bool), modified_at(datetime|None)。
     fetch_docs 每张单据：no, doc_type(LL/AB/TL/BF/TZ), doc_date, posted(bool), remark, ref_doc_no,
         modified_at(datetime|None), lines=[{line_no, material_code, qty, unit_price, project_code, ref_line_no}]。
-        since 为空表示全量；否则只要修改时间 >= since 的单据。
+        since 为空表示全量；否则只要修改时间 >= since 的单据。只返回研发领料（LL）。
+    fetch_doc 按单号取一张退料（TL）/ 报废（BF）单，格式同上；没有返回 None。
     """
 
     def fetch_docs(self, since: datetime | None = None) -> list[dict]: ...
+    def fetch_doc(self, bill_no: str, doc_type: str) -> dict | None: ...
     def fetch_projects(self) -> list[dict]: ...
     def fetch_materials(self, since: datetime | None = None) -> list[dict]: ...
 
