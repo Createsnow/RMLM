@@ -137,10 +137,14 @@ def bind_batch(db: Session, op: User, batch: ScrapBatch, doc: ErpDoc) -> dict:
     全部摊完才置为已核销（否则剩下的明细既不在新批次里、也挂不了单，永远停在"待单据处置"）。"""
     if batch.status == "BOUND":
         raise BizError("该批次已核销")
-    res = allocate(db, op, doc, list(batch.event_ids), "SCRAP")
-    batch.erp_doc_id = doc.id
+    # 批次生成后其中某笔报废被冲销：该笔不再需要报废单，只拿其余明细去摊（否则整批"所选事件无效"、永远挂不了单）
     rev = _reversed_ids(db)
-    rest = sum((D(db.get(Event, i).qty) - _allocated(db, event_id=i) for i in batch.event_ids if i not in rev), D(0))
+    live = [i for i in batch.event_ids if i not in rev]
+    if not live:
+        raise BizError("该批次的整件报废已全部冲销，无需挂报废单")
+    res = allocate(db, op, doc, live, "SCRAP")
+    batch.erp_doc_id = doc.id
+    rest = sum((D(db.get(Event, i).qty) - _allocated(db, event_id=i) for i in live), D(0))
     if rest <= 0:
         batch.status = "BOUND"
     res["batch_rest"] = qs(max(rest, D(0)))

@@ -152,8 +152,12 @@ def recent_events(db: Session, lines: list[LedgerLine], users: dict, mats: dict,
 def observe(db: Session, lines: list[LedgerLine], calcs) -> dict:
     today = clock.today()
     diffs = list(db.scalars(select(ReconDiff)))
-    scrap_events = list(db.scalars(select(Event).where(Event.etype == "SCRAP", Event.status == "EFFECTIVE",
-                                                       Event.scrap_mode == "WHOLE")))
+    # 被冲销的整件报废不再需要报废单，不算进覆盖率分母
+    reversed_ids = set(db.scalars(select(Event.reverses_id).where(Event.etype == "REVERSAL",
+                                                                  Event.status == "EFFECTIVE")))
+    scrap_events = [e for e in db.scalars(select(Event).where(Event.etype == "SCRAP", Event.status == "EFFECTIVE",
+                                                              Event.scrap_mode == "WHOLE"))
+                    if e.id not in reversed_ids]
     alloc = dict(db.execute(select(DocAlloc.event_id, func.sum(DocAlloc.qty)).group_by(DocAlloc.event_id)).all())
     covered = sum(1 for e in scrap_events if D(alloc.get(e.id, 0)) >= D(e.qty))
     q = quarter_of(today)

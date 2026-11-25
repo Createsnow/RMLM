@@ -90,6 +90,11 @@ def save_doc(db: Session, op: User | None, data: dict, source: str = "MANUAL") -
 
 def set_posted(db: Session, op: User, doc: ErpDoc, posted: bool) -> ErpDoc:
     require_role(op, "KEEPER", "ADMIN")
+    from .recon import period_closed
+
+    if doc.posted != posted and period_closed(db, doc.doc_date):
+        # 关账后该月单据不能再变（同录入、金蝶同步的口径），否则已关账月份冒出新差异
+        raise BizError(f"{doc.doc_date:%Y-%m} 已关账，不能再改该月单据的过账状态，请财务开调整单")
     doc.posted = posted
     after_doc_change(db, doc)
     return doc

@@ -531,9 +531,11 @@ def transfer_decide(db: Session, req: Event, op: User, accept: bool) -> Event:
     if op.id != req.to_user_id:
         raise forbid("只有受让人本人可以确认")
     line = db.get(LedgerLine, req.line_id)
-    _guard(db, line)
-    if accept and ledger.load_one(db, line, lock=True).balance <= 0:
-        raise BizError("该物料结存已为 0（发起转交后已用完或退库 / 报废），不能接收，请点「拒绝」")
+    if accept:
+        # 只有"接收"才改持有人、需要校验行状态；拒绝不动台账，锁定 / 作废的行也要能拒绝，免得待办一直挂着
+        _guard(db, line)
+        if ledger.load_one(db, line, lock=True).balance <= 0:
+            raise BizError("该物料结存已为 0（发起转交后已用完或退库 / 报废），不能接收，请点「拒绝」")
     req.status = "EFFECTIVE" if accept else "REJECTED"
     req.reviewed_by, req.reviewed_at = op.id, clock.now()
     close_todos(db, "event", req.id)
@@ -699,6 +701,11 @@ def reversal_decide(db: Session, rev: Event, op: User, approve: bool, note: str 
     target = db.get(Event, rev.reverses_id)
     line = db.get(LedgerLine, rev.line_id)
     db.refresh(line, with_for_update=True)  # 与该行上的其他动作串行，结存按最新事件算
+    from .recon import period_closed
+
+    if approve and period_closed(db, target.created_at):
+        # 发起时还没关账、复核前财务关了账：同样不能再改该月的数，只能驳回
+        raise BizError(f"该事件所在月份 {target.created_at:%Y-%m} 已关账，冲销不能生效，请驳回；如需更正请在本月补登")
     if approve and target.etype == "SPLIT_OUT":
         kids = list(db.scalars(select(LedgerLine).where(LedgerLine.split_event_id == target.id)))
         for k in kids:
