@@ -265,8 +265,10 @@ def line_by_code(code: str, user: User = Depends(current_user), db: Session = De
 
     code = code.strip()
     line = db.scalar(select(LedgerLine).where(LedgerLine.code == code))
+    mc = db.scalar(select(MaterialCode).where(MaterialCode.code == code))
+    if mc is not None and mc.replaced:
+        raise BizError(f"物料码 {code} 已拆分替换（B4），不能再扫；请扫新码")
     if line is None:
-        mc = db.scalar(select(MaterialCode).where(MaterialCode.code == code))
         if mc is not None and mc.replaced:
             raise BizError(f"物料码 {code} 已拆分替换（B4），不能再扫；请扫新码")
         pending = _pending_sign_by_barcode(db, user, code)

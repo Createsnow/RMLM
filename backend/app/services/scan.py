@@ -33,6 +33,9 @@ def resolve(db: Session, viewer: User, raw: str) -> dict:
 
     # 1. 物料码（当前有效码）
     line = db.scalar(select(LedgerLine).where(LedgerLine.code == code))
+    if line is not None and db.scalar(select(MaterialCode.id).where(MaterialCode.code == code,
+                                                                    MaterialCode.replaced.is_(True))):
+        raise BizError(f"物料码 {code} 已拆分替换（B4），不能再扫；请扫新码")
     if line is not None:
         if not can_view_line(db, viewer, line):
             from ..errors import forbid

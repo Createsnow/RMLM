@@ -23,7 +23,7 @@ from ..config import settings
 from ..errors import BizError
 from ..models import ErpDoc, ErpLine, JobRun, Material
 from . import erp
-from .common import D, add_todo, users_with_role
+from .common import D, add_todo, close_todos, users_with_role
 from .master_sync import make_reader
 
 log = logging.getLogger("rmlm.sync")
@@ -89,6 +89,13 @@ def _update(db: Session, doc: ErpDoc, row: dict) -> bool:
     for c in changes:
         if c[0] == "posted":
             doc.posted = c[1]
+            if not c[1]:
+                # 金蝶反审核 / 作废：已签收的领用行、已做的分摊仍在，对账会把差额列进差异池；先提醒领料专员核对
+                for u in users_with_role(db, "KEEPER"):
+                    add_todo(db, u.id, "ERP_UNPOSTED", f"金蝶单据 {doc.no} 已反审核或作废，请核对中台已签收 / 已分摊的明细",
+                             "erpdoc", doc.id, due_hours=48, dedupe=True)
+            else:
+                close_todos(db, "erpdoc", doc.id, ("ERP_UNPOSTED",))
         elif c[0] == "remark":
             doc.remark = c[1]
         elif c[0] == "add":

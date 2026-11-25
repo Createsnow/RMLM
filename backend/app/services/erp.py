@@ -6,6 +6,7 @@
 """
 import re
 from datetime import date, datetime
+from decimal import Decimal
 from typing import Protocol
 
 from openpyxl import load_workbook
@@ -139,9 +140,7 @@ def suggestions(db: Session) -> list[dict]:
                 for it in r.items:
                     if it.material_id != ln.material_id:
                         continue
-                    bound = db.scalar(select(LedgerLine.id).where(LedgerLine.req_item_id == it.id,
-                                                                  LedgerLine.erp_line_id.is_not(None)).limit(1))
-                    if bound:
+                    if issued_qty(db, it) >= D(it.qty):
                         continue
                     out.append({"erp_line_id": ln.id, "erp_doc_no": doc.no, "erp_line_no": ln.line_no,
                                 "req_item_id": it.id, "req_no": r.no, "qty": str(ln.qty)})
@@ -149,6 +148,14 @@ def suggestions(db: Session) -> list[dict]:
 
 
 AUTO_SOURCES = ("API", "IMPORT")
+
+
+def issued_qty(db: Session, item: ReqItem) -> Decimal:
+    """申请明细已经开单的数量：绑定到的金蝶领料单行数量合计（一行出了多个码、分成多条领用行的，只算一次）。"""
+    erp_ids = set(db.scalars(select(LedgerLine.erp_line_id).where(LedgerLine.req_item_id == item.id,
+                                                                  LedgerLine.level == 1,
+                                                                  LedgerLine.erp_line_id.is_not(None))))
+    return sum((D(db.get(ErpLine, i).qty) for i in erp_ids), D(0))
 
 
 def line_bound(db: Session, erp_line_id: int) -> bool:
@@ -179,8 +186,8 @@ def auto_bind(db: Session) -> int:
                     continue
                 lines = list(db.scalars(select(LedgerLine).where(LedgerLine.req_item_id == it.id,
                                                                  LedgerLine.level == 1)))
-                if any(x.erp_line_id is not None for x in lines):
-                    continue  # 已开单
+                if issued_qty(db, it) >= D(it.qty):
+                    continue  # 已开够申请数量；分批到货没开够的，下一张单仍可自动绑定
                 urgent = next((x for x in lines if x.urgent and x.erp_line_id is None), None)
                 if r.status == "APPROVED" or urgent is not None:
                     cands.append(it)

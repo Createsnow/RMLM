@@ -532,6 +532,8 @@ def transfer_decide(db: Session, req: Event, op: User, accept: bool) -> Event:
         raise forbid("只有受让人本人可以确认")
     line = db.get(LedgerLine, req.line_id)
     _guard(db, line)
+    if accept and ledger.load_one(db, line, lock=True).balance <= 0:
+        raise BizError("该物料结存已为 0（发起转交后已用完或退库 / 报废），不能接收，请点「拒绝」")
     req.status = "EFFECTIVE" if accept else "REJECTED"
     req.reviewed_by, req.reviewed_at = op.id, clock.now()
     close_todos(db, "event", req.id)

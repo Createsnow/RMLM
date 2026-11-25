@@ -19,6 +19,7 @@ KIND_NAMES = {
     "BF_MISMATCH": "报废分摊不平",
     "EVT_NO_ERP": "中台已退/报废、ERP 无单",
     "LINE_NO_ERP": "紧急交接未补 ERP 单",
+    "ERP_UNPOSTED": "ERP 单据已反审核 / 作废",
 }
 
 
@@ -46,24 +47,29 @@ def _compute(db: Session) -> dict[str, dict]:
     alloc_by_line = dict(db.execute(select(DocAlloc.erp_line_id, func.sum(DocAlloc.qty)).where(live)
                                     .group_by(DocAlloc.erp_line_id)).all())
     alloc_by_event = dict(db.execute(select(DocAlloc.event_id, func.sum(DocAlloc.qty)).group_by(DocAlloc.event_id)).all())
-    for doc in db.scalars(select(ErpDoc).where(ErpDoc.doc_type != "TZ", ErpDoc.posted.is_(True))):
+    # 未过账的单据也要看：金蝶反审核 / 作废了一张中台已经用过的单（领料行已签收、退料报废已分摊），
+    # 在金蝶这边数量就算 0，差额进差异池；重新审核后自动平。没用过的未过账单据差额为 0，不产生差异
+    for doc in db.scalars(select(ErpDoc).where(ErpDoc.doc_type != "TZ")):
         for ln in doc.lines:
-            erp_qty = D(ln.qty) + adj.get((doc.no, ln.line_no), D(0))
+            erp_qty = (D(ln.qty) + adj.get((doc.no, ln.line_no), D(0))) if doc.posted else D(0)
             base = {"period": period_of(doc.doc_date), "erp_doc_no": doc.no, "erp_line_no": ln.line_no,
                     "material_id": ln.material_id, "erp_qty": erp_qty}
             if doc.doc_type in ("LL", "AB"):
                 # 一张单据行可能出了多个仓储条码 → 多条领用行，合计后再比
                 bound = list(db.scalars(select(LedgerLine).where(LedgerLine.erp_line_id == ln.id,
                                                                  LedgerLine.level == 1).order_by(LedgerLine.id)))
+                if not doc.posted:
+                    bound = [x for x in bound if x.signed]  # 未过账时只有已签收的行才说明单据曾经生效
                 line = bound[0] if bound else None
                 detail = sum((D(x.qty) for x in bound), D(0))
-                kind = "LL_MISMATCH" if line else "LL_UNBOUND"
+                kind = ("ERP_UNPOSTED" if not doc.posted else "LL_MISMATCH" if line else "LL_UNBOUND")
                 rows[f"ERP:{ln.id}"] = {**base, "kind": kind, "detail_qty": detail, "line_id": line.id if line else None,
                                        "owner_hint": line.issued_by if line else None}
             else:
                 detail = D(alloc_by_line.get(ln.id, 0))
-                rows[f"ERP:{ln.id}"] = {**base, "kind": "TL_MISMATCH" if doc.doc_type == "TL" else "BF_MISMATCH",
-                                       "detail_qty": detail, "line_id": None, "owner_hint": None}
+                kind = ("ERP_UNPOSTED" if not doc.posted else "TL_MISMATCH" if doc.doc_type == "TL"
+                        else "BF_MISMATCH")
+                rows[f"ERP:{ln.id}"] = {**base, "kind": kind, "detail_qty": detail, "line_id": None, "owner_hint": None}
     # 中台有、ERP 无：退库与整件报废事件在 7 天或跨月后仍未挂单
     for e in db.scalars(select(Event).where(Event.etype.in_(("RETURN", "SCRAP")), Event.status == "EFFECTIVE")):
         if e.id in reversed_ids or (e.etype == "SCRAP" and e.scrap_mode != "WHOLE"):

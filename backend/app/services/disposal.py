@@ -78,7 +78,6 @@ def allocate(db: Session, op: User, doc: ErpDoc, event_ids: list[int], kind: str
     for ln in doc.lines:
         rest = D(ln.qty) - _allocated(db, erp_line_id=ln.id)
         pool = by_mat.get(ln.material_id, [])
-        sources = {_root_doc(db, e.line_id) for e in pool}
         for e in pool:
             if rest <= 0:
                 break
@@ -86,8 +85,7 @@ def allocate(db: Session, op: User, doc: ErpDoc, event_ids: list[int], kind: str
             if e_rest <= 0:
                 continue
             q = min(rest, e_rest)
-            a = DocAlloc(kind=kind, erp_line_id=ln.id, event_id=e.id, qty=q, cross_doc=len(sources) > 1,
-                         created_by=op.id)
+            a = DocAlloc(kind=kind, erp_line_id=ln.id, event_id=e.id, qty=q, cross_doc=False, created_by=op.id)
             db.add(a)
             db.flush()
             created.append(a)
@@ -96,6 +94,12 @@ def allocate(db: Session, op: User, doc: ErpDoc, event_ids: list[int], kind: str
                 close_todos(db, "event", e.id, ("RETURN_DOC",))
         if rest > 0:
             leftover.append({"line_no": ln.line_no, "unallocated": str(rest)})
+    # 跨单匹配：这张单据（含以前的分摊）实际摊到的事件来自不止一张领料单
+    all_allocs = list(db.scalars(select(DocAlloc).where(DocAlloc.erp_line_id.in_([ln.id for ln in doc.lines] or [0]))))
+    sources = {_root_doc(db, db.get(Event, a.event_id).line_id) for a in all_allocs}
+    for a in all_allocs:
+        a.cross_doc = len(sources) > 1
+    db.flush()
     from . import recon
 
     recon.run(db)

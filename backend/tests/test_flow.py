@@ -160,14 +160,14 @@ def test_return_many_to_many_and_recon(org, ref):
     pending = org.ok(org.get("keeper", "/api/returns/pending"))
     assert len(pending) == 3
     ev_ids = [p["event_id"] for p in pending]
-    # 第一张退料单 8 米：跨两张领料单，按时间先进先出
+    # 第一张退料单 8 米：按时间先进先出，全摊在第一张领料单的两次退库上，不算跨单
     t1 = erp_doc(org, "TL", [{"material_code": "M-CABLE", "qty": 8}])
     res = org.ok(org.post("keeper", "/api/returns/allocate", {"erp_doc_id": t1["id"], "event_ids": ev_ids}))
-    assert res["cross_doc"] and not res["leftover"]
-    # 第二张退料单 8 米，只剩 7 米可摊 → 差 1 进差异池
+    assert not res["cross_doc"] and not res["leftover"]
+    # 第二张退料单 8 米：摊到两张领料单（跨单），只剩 7 米可摊 → 差 1 进差异池
     t2 = erp_doc(org, "TL", [{"material_code": "M-CABLE", "qty": 8}])
     res = org.ok(org.post("keeper", "/api/returns/allocate", {"erp_doc_id": t2["id"], "event_ids": ev_ids}))
-    assert res["leftover"] == [{"line_no": 1, "unallocated": "1.000"}]
+    assert res["cross_doc"] and res["leftover"] == [{"line_no": 1, "unallocated": "1.000"}]
     assert org.ok(org.get("a1", f"/api/lines/{l1['id']}"))["status"] == "S7"
     diffs = [d for d in org.ok(org.get("keeper", "/api/recon/diffs")) if d["erp_doc_no"] == t2["no"]]
     assert diffs and diffs[0]["diff"] == "1"
