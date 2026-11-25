@@ -14,11 +14,25 @@ from ..models import Photo, User
 MAX_UPLOAD = 15 * 1024 * 1024
 
 
+# 水印里有人名，必须用中文字体。没配置 RMLM_WATERMARK_FONT 时按顺序找常见系统字体（Linux / Windows / Mac）
+FONT_CANDIDATES = (
+    "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "C:/Windows/Fonts/msyh.ttc",
+    "C:/Windows/Fonts/simhei.ttf",
+    "/System/Library/Fonts/PingFang.ttc",
+    "/System/Library/Fonts/STHeiti Medium.ttc",
+)
+
+
 def _font(size: int):
-    try:
-        return ImageFont.truetype(settings.watermark_font, size)
-    except OSError:
-        return ImageFont.load_default()
+    paths = ([settings.watermark_font] if settings.watermark_font else []) + list(FONT_CANDIDATES)
+    for path in paths:
+        try:
+            return ImageFont.truetype(path, size)
+        except OSError:
+            continue
+    return ImageFont.load_default()  # 不含中文：人名会显示成方块
 
 
 def save_photo(db: Session, user: User, raw: bytes) -> Photo:

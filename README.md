@@ -95,6 +95,7 @@ RMLM_DATABASE_URL="mysql+pymysql://rmlm:密码@127.0.0.1:3306/rmlm_test?charset=
 | `RMLM_OVER_ISSUE_PCT` | 开单数量允许超出申请数量的比例（%），0 = 不允许超出 | 0 |
 | `RMLM_PHOTO_DIR` | 照片目录（永久保存） | `./data/photos` |
 | `RMLM_PHOTO_MAX_KB` | 照片压缩目标大小 | 300 |
+| `RMLM_WATERMARK_FONT` | 照片水印的中文字体文件 | 空：依次找 Linux 文泉驿、Windows 微软雅黑 / 黑体、Mac 苹方 / 黑体 |
 | `RMLM_SCHEDULER` | 是否启动定时任务（1/0） | 1 |
 | `RMLM_ADMIN_USER` / `RMLM_ADMIN_PASSWORD` | 首次启动时创建的管理员 | admin / admin123 |
 | `RMLM_PUBLIC_URL` | 对外访问地址（企微消息链接、网页授权回调） | 空 |

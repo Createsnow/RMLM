@@ -43,6 +43,8 @@ services:
       K3_APP_SECRET: ${K3_APP_SECRET:-}
       K3_LCID: ${K3_LCID:-2052}
       K3_USE_ORG: ${K3_USE_ORG:-100}
+      # 研发领料在金蝶其他出库单里的单据类型（名称或编码，逗号分隔）
+      K3_LL_BILL_TYPES: ${K3_LL_BILL_TYPES:-研发测试其他出库单,客供领料其他出库单}
       K3_LOGIN_TIMEOUT: ${K3_LOGIN_TIMEOUT:-30}
       K3_QUERY_TIMEOUT: ${K3_QUERY_TIMEOUT:-120}
       K3_VIEW_TIMEOUT: ${K3_VIEW_TIMEOUT:-60}
