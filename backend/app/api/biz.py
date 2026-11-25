@@ -12,7 +12,7 @@ from ..errors import BizError, forbid
 from ..models import ErpDoc, ErpLine, Event, LedgerLine, Material, PeriodClose, ReconDiff, Requisition, ScrapBatch, User
 from ..perms import active_delegates, can_view_line, has_role, require_role, visible_user_ids
 from ..security import current_user
-from ..services import disposal, doc_sync, erp as erpsvc, ledger, lineops, recon, reports
+from ..services import disposal, doc_sync, erp as erpsvc, ledger, lineops, recon, reports, todo_sweep
 from ..services import requisition as reqsvc
 from ..services.k3cloud import K3Error
 from ..services.recon import KIND_NAMES
@@ -385,6 +385,7 @@ class DueIn(BaseModel):
 def _done(db: Session, user: User, line: LedgerLine, extra: dict | None = None) -> dict:
     db.flush()
     db.refresh(line)
+    todo_sweep.sweep_line(db, line)  # 动作做完，已办完的处置类待办（超期、须全额退库、结项清零等）当场关闭
     d = line_out(db, line, user, full=True)
     if extra:
         d["result"] = extra
@@ -578,6 +579,8 @@ def line_requests(user: User = Depends(current_user), db: Session = Depends(get_
 @router.post("/line-requests/{eid}/decide")
 def line_request_decide(eid: int, body: ReviewIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
     ev = lineops.line_request_decide(db, get_or_404(db, Event, eid, "申请"), user, body.approve, body.note)
+    db.flush()
+    todo_sweep.sweep_line(db, db.get(LedgerLine, ev.line_id))  # 归还日延后、不再超期：超期待办关闭
     return {"ok": True, "status": ev.status}
 
 
@@ -609,6 +612,8 @@ def reversals(status: str = "PENDING", user: User = Depends(current_user), db: S
 def reversal_decide(eid: int, body: ReviewIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
     ev = lineops.reversal_decide(db, get_or_404(db, Event, eid, "冲销"), user, body.approve, body.note)
     recon.run(db)
+    db.flush()
+    todo_sweep.sweep_line(db, db.get(LedgerLine, ev.line_id))  # 冲销后结存 / D02 待回填可能变化
     return {"ok": True, "status": ev.status}
 
 

@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from .. import clock
 from ..models import ErpDoc, ErpLine, Freeze, JobRun, LedgerLine, Project, Requisition, Todo, User
 from ..perms import active_delegates, default_approver
-from . import disposal, doc_sync, erp, ledger, master_sync, recon, wecom
+from . import disposal, doc_sync, erp, ledger, master_sync, recon, todo_sweep, wecom
 from .common import add_todo, notify, period_of, quarter_of, users_with_role
 
 
@@ -76,6 +76,8 @@ def quarter_hour(db: Session) -> dict:
                 if add_todo(db, k.id, "ERP_UNBOUND", f"ERP 有单无明细：{doc.no} 第 {ln.line_no} 行，请补登",
                             "erpline", ln.id, dedupe=True):
                     stats["unbound"] += 1
+    # 升级之前先关掉已经办完的处置类待办（行已清零、归还日已延后、事件已冲销、单据已反审核……），免得误升级
+    todo_sweep.sweep(db)
     # 4. 通用升级：48 小时未处理 → 直属上级；连续 3 天未关闭 → 月度经营会挂账
     for t in db.scalars(select(Todo).where(Todo.state == "OPEN", Todo.is_notice.is_(False), Todo.level == 1,
                                            Todo.kind != "APPROVE")):

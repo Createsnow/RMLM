@@ -748,6 +748,8 @@ def reversal_decide(db: Session, rev: Event, op: User, approve: bool, note: str 
     rev.status = "EFFECTIVE" if approve else "REJECTED"
     rev.reviewed_by, rev.reviewed_at, rev.note = op.id, clock.now(), note
     close_todos(db, "event", rev.id)
+    if approve and target.etype == "RETURN":
+        close_todos(db, "event", target.id, ("RETURN_DOC",))  # 退库已冲销，不再需要开退料单
     if approve:
         c = ledger.load_one(db, line, lock=True)
         if c.balance < 0 or c.balance > D(line.qty):
