@@ -88,7 +88,7 @@ def get_req(rid: int, user: User = Depends(current_user), db: Session = Depends(
         raise forbid()
     d = req_out(db, r, detail=True)
     d["can_approve"] = r.status == "PENDING" and reqsvc.approver_capacity(db, user, r) is not None
-    d["can_cancel"] = r.status == "PENDING" and user.id in (r.user_id, r.created_by)
+    d["can_cancel"] = reqsvc.can_cancel(db, user, r)
     return d
 
 

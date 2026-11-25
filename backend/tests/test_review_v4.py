@@ -159,3 +159,111 @@ def test_overdue_clear_rate_scoped(org, ref):
 def test_close_period_rejects_bad_format(org, ref):
     r = org.post("fin", "/api/recon/close/2026-1")
     assert r.status_code == 400 and "格式" in r.json()["detail"]
+
+
+# ================================================================== 业务答复（2026-11-25）后的修改：M / N / O / P
+def _put_user(org, ref, username, **kw):
+    from app import db as dbmod
+    from app.models import User
+
+    with dbmod.SessionLocal() as db:
+        u = db.get(User, ref.user(username))
+        body = {"username": u.username, "name": u.name, "manager_id": u.manager_id,
+                "roles": sorted(u.role_set), "active": u.active}
+    body.update(kw)
+    return org.c.put(f"/api/users/{ref.user(username)}", json=body, headers=org._h("admin"))
+
+
+# ------------------------------------------------------------------ M：审核通过派"待开单"，开够即关
+def test_issue_todo_after_approval_closes_when_fully_issued(org, ref):
+    req = make_req(org, ref, qty=10)
+    assert not _todos(org, "keeper", "ISSUE")
+    org.ok(org.post("lead_a", f"/api/requisitions/{req['id']}/decide", {"approve": True}))
+    assert _todos(org, "keeper", "ISSUE")
+    item = req["items"][0]["id"]
+    part = erp_doc(org, "LL", [{"material_code": "M-CABLE", "qty": 6}])
+    org.ok(org.post("keeper", "/api/erp/bind", {"req_item_id": item, "erp_line_id": part["lines"][0]["id"]}))
+    assert _todos(org, "keeper", "ISSUE"), "只开了 6 / 10，待开单仍在"
+    rest = erp_doc(org, "LL", [{"material_code": "M-CABLE", "qty": 4}])
+    org.ok(org.post("keeper", "/api/erp/bind", {"req_item_id": item, "erp_line_id": rest["lines"][0]["id"]}))
+    assert not _todos(org, "keeper", "ISSUE")
+
+
+def test_rejected_requisition_gets_no_issue_todo(org, ref):
+    req = make_req(org, ref, qty=10)
+    org.ok(org.post("lead_a", f"/api/requisitions/{req['id']}/decide", {"approve": False, "note": "不需要"}))
+    assert not _todos(org, "keeper", "ISSUE")
+
+
+# ------------------------------------------------------------------ N：离职检查看待确认转交和未开完单的申请
+def test_clearance_checks_pending_transfer_and_open_requisitions(org, ref):
+    l1 = issue(org, ref, who="a2", qty=10)
+    org.ok(org.post("a2", f"/api/lines/{l1['id']}/transfer", {"to_user_id": ref.user("a1"), "reason": "交接"}))
+    req = make_req(org, ref, who="a1", qty=5)
+    org.ok(org.post("lead_a", f"/api/requisitions/{req['id']}/decide", {"approve": True}))
+    c = org.ok(org.get("admin", f"/api/users/{ref.user('a1')}/clearance"))
+    assert not c["clear"] and len(c["transfers"]) == 1 and [r["no"] for r in c["reqs"]] == [req["no"]]
+    r = _put_user(org, ref, "a1", active=False)
+    assert r.status_code == 400 and "转交" in r.json()["detail"] and req["no"] in r.json()["detail"]
+    # 拒绝转交、撤回审核通过但还没开单的申请后可以停用
+    tr = _events(org, l1["id"], "TRANSFER_REQ", who="a2")[0]
+    org.ok(org.post("a1", f"/api/transfers/{tr['id']}/decide?accept=false"))
+    assert org.ok(org.get("a1", f"/api/requisitions/{req['id']}"))["can_cancel"]
+    org.ok(org.post("a1", f"/api/requisitions/{req['id']}/cancel"))
+    assert not _todos(org, "keeper", "ISSUE")
+    assert org.ok(org.get("admin", f"/api/users/{ref.user('a1')}/clearance"))["clear"]
+    assert _put_user(org, ref, "a1", active=False).status_code == 200
+
+
+def test_cancel_partially_issued_requisition_stops_further_binding(org, ref):
+    req = make_req(org, ref, qty=10)
+    org.ok(org.post("lead_a", f"/api/requisitions/{req['id']}/decide", {"approve": True}))
+    part = erp_doc(org, "LL", [{"material_code": "M-CABLE", "qty": 6}])
+    line = org.ok(org.post("keeper", "/api/erp/bind",
+                           {"req_item_id": req["items"][0]["id"], "erp_line_id": part["lines"][0]["id"]}))
+    assert org.post("b1", f"/api/requisitions/{req['id']}/cancel").status_code == 403
+    org.ok(org.post("keeper", f"/api/requisitions/{req['id']}/cancel"))
+    more = erp_doc(org, "LL", [{"material_code": "M-CABLE", "qty": 4}], remark=req["no"])
+    r = org.post("keeper", "/api/erp/bind", {"req_item_id": req["items"][0]["id"], "erp_line_id": more["lines"][0]["id"]})
+    assert r.status_code == 400 and "已撤回" in r.json()["detail"]
+    assert not [x for x in org.ok(org.get("keeper", "/api/erp/suggestions")) if x["req_no"] == req["no"]]
+    assert org.ok(org.get("a1", f"/api/lines/{line['id']}"))["qty"] == "6"  # 已开单的行照常
+
+
+def test_cannot_cancel_fully_issued_or_urgent_unbound(org, ref):
+    l1 = issue(org, ref, qty=10)
+    r = org.post("a1", f"/api/requisitions/{l1['_req']['id']}/cancel")
+    assert r.status_code == 400 and "已全部开单" in r.json()["detail"]
+    req = make_req(org, ref, qty=5, urgent=True, urgent_note="组长口头同意")
+    org.ok(org.post("keeper", f"/api/requisitions/{req['id']}/urgent-handover/{req['items'][0]['id']}"))
+    org.ok(org.post("lead_a", f"/api/requisitions/{req['id']}/decide", {"approve": True}))
+    r = org.post("keeper", f"/api/requisitions/{req['id']}/cancel")
+    assert r.status_code == 400 and "紧急" in r.json()["detail"]
+
+
+# ------------------------------------------------------------------ O：最上级不冻结
+def test_top_level_holder_not_frozen(org, ref):
+    from app import db as dbmod
+    from app.models import User
+
+    issue(org, ref, who="vp", approver="admin", qty=10)   # 研发副总没有直属上级
+    issue(org, ref, who="a1", qty=10)
+    clock.set_now(datetime(2026, 12, 20, 9, 0))  # 超期 18 天、18 天无动作
+    _job(org, "daily")
+    with dbmod.SessionLocal() as db:
+        assert db.get(User, ref.user("vp")).frozen is False
+        assert db.get(User, ref.user("a1")).frozen is True
+
+
+# ------------------------------------------------------------------ P：改直属上级后改派续期 / 改归还日
+def test_manager_change_reassigns_pending_line_requests(org, ref):
+    l1 = issue(org, ref, qty=10)
+    new_date = (clock.today() + timedelta(days=60)).isoformat()
+    org.ok(org.post("a1", f"/api/lines/{l1['id']}/due-change", {"new_date": new_date, "reason": "实验延期"}))
+    assert _todos(org, "lead_a", "LINE_APPROVE")
+    org.ok(_put_user(org, ref, "a1", manager_id=ref.user("lead_b")))
+    assert not _todos(org, "lead_a", "LINE_APPROVE")
+    t = _todos(org, "lead_b", "LINE_APPROVE")
+    assert t and "直属上级变更" in t[0]["title"]
+    ev = _events(org, l1["id"], "DUE_CHANGE")[0]
+    org.ok(org.post("lead_b", f"/api/line-requests/{ev['id']}/decide", {"approve": True}))

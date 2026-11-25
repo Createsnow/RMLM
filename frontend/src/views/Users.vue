@@ -87,7 +87,8 @@ async function save() {
 }
 async function clearance() {
   const r = await api.get(`/api/users/${f.id}/clearance`)
-  ElMessageBox.alert(r.clear ? '名下无结存，可以办理离职 / 调岗。' : `名下还有 ${r.lines.length} 行未清零：${r.lines.map(l => l.code + '（' + l.balance + '）').join('、')}`, '离职检查')
+  const detail = [r.text, r.lines.length ? '未清零的行：' + r.lines.map(l => l.code + '（' + l.balance + '）').join('、') : ''].filter(Boolean).join('。')
+  ElMessageBox.alert(r.clear ? '名下无结存、无待确认转交、无未开完单的申请，可以办理离职 / 调岗。' : detail, '离职检查')
 }
 async function doImport({ file }) { const r = await api.upload('/api/users/import', file); ElMessage.success(`新建 ${r.created} 个账号，初始密码 ${r.initial_password}`); load() }
 async function syncContacts() {

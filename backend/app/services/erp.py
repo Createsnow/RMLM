@@ -147,7 +147,14 @@ def suggestions(db: Session) -> list[dict]:
                 for it in r.items:
                     if it.material_id != ln.material_id:
                         continue
-                    if issued_qty(db, it) + D(ln.qty) > D(it.qty):
+                    urgent_open = db.scalar(select(LedgerLine.id).where(
+                        LedgerLine.req_item_id == it.id, LedgerLine.urgent.is_(True),
+                        LedgerLine.erp_line_id.is_(None), LedgerLine.level == 1).limit(1))
+                    if urgent_open:
+                        pass  # 紧急交接还没补单的：不论申请状态都要补挂（与绑定规则一致）
+                    elif r.status != "APPROVED":
+                        continue  # 待审核、已驳回、已撤回的申请不能开单，不作为建议
+                    elif issued_qty(db, it) + D(ln.qty) > D(it.qty):
                         continue  # 已开够或这张单会超出申请数量：不作为建议
                     out.append({"erp_line_id": ln.id, "erp_doc_no": doc.no, "erp_line_no": ln.line_no,
                                 "req_item_id": it.id, "req_no": r.no, "qty": str(ln.qty)})
@@ -240,7 +247,10 @@ def _bind(db: Session, op: User | None, item: ReqItem, erp: ErpLine) -> LedgerLi
                 ul.unit_price = erp.unit_price
             reqsvc.refresh_urgent(db, ul)
         close_todos(db, "erpline", erp.id)
+        reqsvc.close_issue_if_done(db, req)
         return urgent_lines[0]
+    if req.status == "CANCELLED":
+        raise BizError(f"申请 {req.no} 已撤回，不能再开单")
     if req.status != "APPROVED":
         raise BizError("申请未经直属上级审核，不能开单")
     rest = D(item.qty) - issued_qty(db, item)
@@ -251,6 +261,7 @@ def _bind(db: Session, op: User | None, item: ReqItem, erp: ErpLine) -> LedgerLi
                        f"或由申请人补提申请")
     line = reqsvc._new_line(db, op, req, item, qty=erp.qty, erp_line=erp)
     close_todos(db, "erpline", erp.id)
+    reqsvc.close_issue_if_done(db, req)
     if erp.doc.posted:
         add_todo(db, line.holder_id, "SIGN", f"请签收物料 {line.code}", "line", line.id)
     return line

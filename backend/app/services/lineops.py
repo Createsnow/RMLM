@@ -554,7 +554,14 @@ def transfer_decide(db: Session, req: Event, op: User, accept: bool) -> Event:
     return e
 
 
-def _reassign_line_requests(db: Session, line: LedgerLine) -> None:
+def reassign_user_requests(db: Session, user: User) -> None:
+    """持有人的直属上级变了（账号管理或企微通讯录同步）：名下行待审的续期 / 改归还日改派给新上级。"""
+    pending = select(Event.line_id).where(Event.etype.in_(("RENEW", "DUE_CHANGE")), Event.status == "PENDING")
+    for line in db.scalars(select(LedgerLine).where(LedgerLine.holder_id == user.id, LedgerLine.id.in_(pending))):
+        _reassign_line_requests(db, line, "（直属上级变更后改派）")
+
+
+def _reassign_line_requests(db: Session, line: LedgerLine, why: str = "（转交后改派）") -> None:
     """转交生效后，该行待审的续期 / 改归还日改由新持有人的直属上级审核（业务确认 2026-11-25）：
     原审核人的待办关闭，给新审核人派待办。"""
     approver = _line_approver(db, line)
@@ -563,7 +570,7 @@ def _reassign_line_requests(db: Session, line: LedgerLine) -> None:
         close_todos(db, "event", r.id, ("LINE_APPROVE",))
         what = (f"续期审核：{line.code} 续 {r.extra['months']} 个月" if r.etype == "RENEW"
                 else f"改归还日审核：{line.code} → {r.extra['new_date']}")
-        add_todo(db, approver.id, "LINE_APPROVE", what + "（转交后改派）", "event", r.id, due_hours=24)
+        add_todo(db, approver.id, "LINE_APPROVE", what + why, "event", r.id, due_hours=24)
 
 
 # ------------------------------------------------------------------ 退库 / 报废

@@ -15,7 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .. import clock
-from ..models import ErpDoc, ErpLine, Event, LedgerLine, Project, Todo
+from ..models import ErpDoc, ErpLine, Event, LedgerLine, Project, Requisition, Todo
 from . import ledger
 from .common import D, close_todos
 from .disposal import _allocated
@@ -57,7 +57,7 @@ def sweep_line(db: Session, line: LedgerLine) -> None:
 
 def sweep(db: Session) -> None:
     open_todos = list(db.scalars(select(Todo).where(Todo.state == "OPEN", Todo.is_notice.is_(False), Todo.kind.in_(
-        LINE_KINDS + ("RETURN_DOC", "ERP_UNBOUND", "OFFBOARD")))))
+        LINE_KINDS + ("RETURN_DOC", "ERP_UNBOUND", "OFFBOARD", "ISSUE")))))
     # 1. 领用行上的
     line_ids = {t.ref_id for t in open_todos if t.ref_type == "line" and t.kind in LINE_KINDS}
     lines = list(db.scalars(select(LedgerLine).where(LedgerLine.id.in_(line_ids)))) if line_ids else []
@@ -78,11 +78,17 @@ def sweep(db: Session) -> None:
         bound = db.scalar(select(LedgerLine.id).where(LedgerLine.erp_line_id == ln.id).limit(1)) is not None
         if bound or not doc.posted or ln.qty <= 0:
             close_todos(db, "erpline", ln.id, ("ERP_UNBOUND",))
-    # 4. 离职清零：名下已清零（下次通讯录同步时停用账号）
-    from .wecom import open_lines
+    # 4. 离职清零：名下已清零、没有待他确认的转交、没有未开完单的申请（下次通讯录同步时停用账号）
+    from .wecom import offboard_blockers
 
     for uid in {t.ref_id for t in open_todos if t.kind == "OFFBOARD" and t.ref_type == "user"}:
-        if not open_lines(db, uid):
+        if not any(offboard_blockers(db, uid).values()):
             close_todos(db, "user", uid, ("OFFBOARD",))
+    # 5. 待开单：已开够申请数量（含金蝶自动绑定）或申请已撤回
+    from .requisition import close_issue_if_done
+
+    req_ids = {t.ref_id for t in open_todos if t.kind == "ISSUE" and t.ref_type == "req"}
+    for r in db.scalars(select(Requisition).where(Requisition.id.in_(req_ids))) if req_ids else []:
+        close_issue_if_done(db, r)
     db.flush()
 

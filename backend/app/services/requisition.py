@@ -9,7 +9,8 @@ from ..errors import BizError, forbid
 from ..models import LedgerLine, Material, MaterialCode, Project, ReqItem, Requisition, User
 from ..perms import active_delegates, default_approver, has_role, proxy_check, require_role
 from . import wms
-from .common import D, add_months, add_todo, close_todos, dict_codes, new_code, new_line_no, new_no, notify
+from .common import (D, add_months, add_todo, close_todos, dict_codes, new_code, new_line_no, new_no, notify,
+                     users_with_role)
 
 
 def create(db: Session, op: User, data: dict) -> Requisition:
@@ -113,19 +114,58 @@ def decide(db: Session, op: User, req: Requisition, approve: bool, note: str | N
     if approve:
         for l in lines:
             refresh_urgent(db, l)
+        push_issue(db, req)
     else:
         for l in lines:  # 紧急领用已交接、补审被驳回 → 全额退库
             add_todo(db, l.holder_id, "MUST_RETURN", f"申请被驳回，{l.code} 须全额退库", "line", l.id, due_hours=24)
     return req
 
 
+def issue_done(db: Session, req: Requisition) -> bool:
+    """开单已完成：申请不再是"审核通过"（已撤回等），或每项物料绑定的金蝶领料单合计已开够申请数量。"""
+    if req.status != "APPROVED":
+        return True
+    from .erp import issued_qty
+
+    return all(issued_qty(db, it) >= D(it.qty) for it in req.items)
+
+
+def push_issue(db: Session, req: Requisition) -> None:
+    """蓝图 3.1 ②：审核通过即给领料专员派"待开单"待办；开够申请数量（自动或手工绑定金蝶单）后自动关闭。"""
+    if issue_done(db, req):
+        return
+    for k in users_with_role(db, "KEEPER"):
+        add_todo(db, k.id, "ISSUE", f"待开单：领料申请 {req.no}{'（紧急，已先交接）' if req.urgent else ''}",
+                 "req", req.id, dedupe=True)
+
+
+def close_issue_if_done(db: Session, req: Requisition) -> None:
+    if issue_done(db, req):
+        close_todos(db, "req", req.id, ("ISSUE",))
+
+
+def can_cancel(db: Session, op: User, req: Requisition) -> bool:
+    if req.status == "PENDING":
+        return op.id in (req.user_id, req.created_by)
+    if req.status == "APPROVED" and not issue_done(db, req):
+        # 审核通过、还没开够的申请：本人、代申请人、领料专员、管理员可撤回剩余未开单部分（离职 / 调岗前清理用）
+        return op.id in (req.user_id, req.created_by) or has_role(op, "KEEPER", "ADMIN")
+    return False
+
+
 def cancel(db: Session, op: User, req: Requisition) -> None:
-    if req.status != "PENDING":
-        raise BizError("只能撤回待审核的申请")
-    if op.id not in (req.user_id, req.created_by):
+    if req.status not in ("PENDING", "APPROVED"):
+        raise BizError("只能撤回待审核或审核通过、还没开够单的申请")
+    if req.status == "APPROVED" and issue_done(db, req):
+        raise BizError("该申请已全部开单，不能撤回")
+    if not can_cancel(db, op, req):
         raise forbid()
-    if db.scalar(select(LedgerLine.id).where(LedgerLine.requisition_id == req.id).limit(1)):
+    if db.scalar(select(LedgerLine.id).where(LedgerLine.requisition_id == req.id,
+                                             LedgerLine.erp_line_id.is_(None)).limit(1)):
+        raise BizError("已紧急交接、还没补 ERP 单的申请不能撤回")
+    if req.status == "PENDING" and db.scalar(select(LedgerLine.id).where(LedgerLine.requisition_id == req.id).limit(1)):
         raise BizError("已交接物料的申请不能撤回")
+    # 审核通过、部分已开单的：已生成的领用行照常使用，只是剩余数量不再开单（之后的金蝶单不会再自动绑定）
     req.status = "CANCELLED"
     close_todos(db, "req", req.id)
 

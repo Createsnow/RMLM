@@ -310,6 +310,32 @@ def open_lines(db: Session, user_id: int) -> list[LedgerLine]:
     return [l for l in lines if calcs[l.id].balance > 0 or not l.signed]
 
 
+def offboard_blockers(db: Session, user_id: int) -> dict[str, list]:
+    """离职 / 调岗前必须清理的事项（业务确认 2026-11-25）：
+    lines 名下未清零的行；transfers 别人转给他、还没确认的转交（须由发起人撤回或他本人拒绝）；
+    reqs 他本人还没开完单的申请（待审核，或审核通过未开够数量；须撤回，否则停用后金蝶单过来仍会给他生成领用行）。"""
+    from ..models import Event, Requisition
+    from .requisition import issue_done
+
+    transfers = list(db.scalars(select(Event).where(Event.etype == "TRANSFER_REQ", Event.status == "PENDING",
+                                                    Event.to_user_id == user_id)))
+    reqs = [r for r in db.scalars(select(Requisition).where(Requisition.user_id == user_id,
+                                                            Requisition.status.in_(("PENDING", "APPROVED"))))
+            if r.status == "PENDING" or not issue_done(db, r)]
+    return {"lines": open_lines(db, user_id), "transfers": transfers, "reqs": reqs}
+
+
+def blockers_text(b: dict) -> str:
+    parts = []
+    if b["lines"]:
+        parts.append(f"名下还有 {len(b['lines'])} 行未清零（须退库或转交）")
+    if b["transfers"]:
+        parts.append(f"有 {len(b['transfers'])} 笔转给他的转交待确认（须拒绝或由发起人撤回）")
+    if b["reqs"]:
+        parts.append(f"有 {len(b['reqs'])} 张申请未开完单（{'、'.join(r.no for r in b['reqs'])}，须撤回）")
+    return "；".join(parts)
+
+
 def _descendants(db: Session, uid: int) -> set[int]:
     from ..perms import descendants
 
@@ -381,6 +407,7 @@ def sync_contacts(db: Session, client: WeComClient | None = None) -> dict:
         stats["updated"] += int(changed)
 
     # 直属上级：取企微 direct_leader 的第一位；会形成循环的跳过
+    changed_mgr: list[User] = []
     for uid, info in infos.items():
         u = by_wx.get(uid)
         leaders = [x for x in (info.get("direct_leader") or []) if x != uid]
@@ -390,7 +417,12 @@ def sync_contacts(db: Session, client: WeComClient | None = None) -> dict:
         if leader and leader.id != u.manager_id and leader.id not in _descendants(db, u.id) | {u.id}:
             u.manager_id = leader.id
             stats["manager_set"] += 1
+            changed_mgr.append(u)
     db.flush()
+    from .lineops import reassign_user_requests
+
+    for u in changed_mgr:  # 直属上级变了：名下行待审的续期 / 改归还日改派给新上级
+        reassign_user_requests(db, u)
 
     # 离职 / 停用 / 不在同步范围
     for wx, u in by_wx.items():
@@ -398,15 +430,15 @@ def sync_contacts(db: Session, client: WeComClient | None = None) -> dict:
         gone = info is None or int(info.get("status") or STATUS_ACTIVE) in (STATUS_DISABLED, STATUS_QUIT)
         if not gone or not u.active:
             continue
-        left = open_lines(db, u.id)
-        if not left:
+        b = offboard_blockers(db, u.id)
+        if not any(b.values()):
             u.active = False
             stats["deactivated"] += 1
             continue
         stats["blocked"] += 1
         target = [u.manager_id] if u.manager_id else [a.id for a in users_with_role(db, "ADMIN")]
         for t in target:
-            add_todo(db, t, "OFFBOARD", f"{u.name} 已在企业微信离职或停用，名下还有 {len(left)} 行未清零，请安排退库或转交",
+            add_todo(db, t, "OFFBOARD", f"{u.name} 已在企业微信离职或停用：{blockers_text(b)}"[:250],
                      "user", u.id, dedupe=True)
     db.flush()
     return stats

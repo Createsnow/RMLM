@@ -141,7 +141,8 @@ def daily(db: Session) -> dict:
             recently_released = db.scalar(select(Freeze.id).where(
                 Freeze.user_id == holder.id, Freeze.released_at.is_not(None),
                 Freeze.released_at > now - timedelta(days=14)).limit(1))
-            if (standard and not holder.frozen and not recently_released
+            # 最上级（没有直属上级的人，如研发副总）不冻结：冻结后没人能解冻（业务确认 2026-11-25）
+            if (standard and holder.manager_id and not holder.frozen and not recently_released
                     and (today - line.due_date).days > 14 and idle_since < now - timedelta(days=14)):
                 holder.frozen = True
                 db.add(Freeze(user_id=holder.id, line_id=line.id, reason=f"{line.code} 超期连续 2 周无动作"))
