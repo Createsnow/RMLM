@@ -6,7 +6,7 @@
 - 金蝶里删掉的行，镜像里数量置 0（保留历史引用），由对账发现差额；
 - 已关账月份的单据在金蝶里被改，不改镜像，派待办给领料专员和管理员；
 - 增量：按金蝶"修改日期"，水位记在 job_run（k3_docs），下次从水位往前回退 10 分钟再拉，避免漏单；
-- 研发领料 = 其他出库单中单据类型为"研发测试其他出库单"的（K3_LL_BILL_TYPES），在 k3cloud.K3CloudReader.fetch_docs；
+- 研发领料 = 其他出库单中单据类型为"研发测试其他出库单""客供领料其他出库单"的（K3_LL_BILL_TYPES），在 k3cloud.K3CloudReader.fetch_docs；
 - 退料 / 报废单不批量拉，领料专员分摊时按单号取（fetch_one）；A 转 B、调整单一期不接，手工录入 / Excel 导入。
 """
 from __future__ import annotations

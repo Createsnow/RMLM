@@ -1,4 +1,4 @@
-"""金蝶单据接入：研发领料（其他出库单中"研发测试其他出库单"类型）批量增量拉取；退料 / 报废单按单号取回。
+"""金蝶单据接入：研发领料（其他出库单中"研发测试其他出库单""客供领料其他出库单"类型）批量增量拉取；退料 / 报废单按单号取回。
 
 金蝶不真正连接：用 httpx.MockTransport 模拟 WebAPI，返回列与《其他出库单》《其他入库单》文档里的全查格式一致。
 """
@@ -32,9 +32,9 @@ def _transport(by_form, seen):
 
 
 def _out(no, seq, mat, base_qty, status="C", cancel="A", note="REQ-20261102-0001", price=0.0, proj=" ", head_proj=" ",
-         modified="2026-11-20T10:00:00.123"):
+         modified="2026-11-20T10:00:00.123", bill_type="研发测试其他出库单"):
     # 列顺序 = DOC_FIELDS[STK_MisDelivery]
-    return [no, "2026-11-13T00:00:00", status, cancel, note, head_proj, modified, "研发测试其他出库单",
+    return [no, "2026-11-13T00:00:00", status, cancel, note, head_proj, modified, bill_type,
             1000 + seq, seq, mat, base_qty, price, proj]
 
 
@@ -61,7 +61,8 @@ def test_fetch_ll_filters_rd_bill_type_merges_pages_and_maps_fields():
     docs = reader.fetch_docs(datetime(2026, 11, 1))
     f = seen[0]["FilterString"]
     assert "FDocumentStatus IN ('C','D')" in f and "FStockOrgId.FNumber='100'" in f
-    assert "FBillTypeID.FName IN ('研发测试其他出库单')" in f and "FModifyDate>='2026-11-01 00:00:00'" in f
+    # 研发测试、客供领料两类其他出库单都属于研发物料管控
+    assert "FBillTypeID.FName IN ('研发测试其他出库单','客供领料其他出库单')" in f and "FModifyDate>='2026-11-01 00:00:00'" in f
     assert seen[0]["OrderString"] == "FBillNo ASC, FEntity_FEntryId ASC"
     assert [q["StartRow"] for q in seen] == [0, 2, 4]  # 第一张单的两行跨页也要合并成一张
     assert [d["no"] for d in docs] == ["QTCK-ADT-26110001", "QTCK-ADT-26110002", "QTCK-ADT-26110003"]
@@ -161,3 +162,28 @@ def test_pulled_ll_with_req_no_creates_line(org, ref, monkeypatch):
     assert (stats["created"], stats["auto_bound"]) == (1, 1)
     lines = org.ok(org.get("a1", "/api/lines"))
     assert lines[0]["erp_doc_no"] == "QTCK-ADT-26110001" and lines[0]["status"] == "S0"
+
+
+def test_default_bill_types_include_customer_supplied():
+    assert settings.k3_ll_bill_types == ["研发测试其他出库单", "客供领料其他出库单"]
+
+
+def test_pulled_customer_supplied_ll_creates_line(org, ref):
+    """客供领料其他出库单同样是研发领料：拉回后按备注申请号自动生成领用行，走同一套签收、对账。"""
+    req = make_req(org, ref, qty=5, material="M-MPO")
+    org.ok(org.post("lead_a", f"/api/requisitions/{req['id']}/decide", {"approve": True}))
+    seen = []
+    reader = _reader({"STK_MisDelivery": [_out("QTCK-ADT-26110009", 1, "M-MPO", 5.0, note=req["no"],
+                                                modified="2026-11-02T08:00:00", bill_type="客供领料其他出库单")]},
+                     seen)
+    from app import db as dbmod
+
+    with dbmod.SessionLocal() as db:
+        stats = doc_sync.sync_docs(db, reader=reader)
+        db.commit()
+    assert (stats["created"], stats["auto_bound"]) == (1, 1)
+    line = org.ok(org.get("a1", "/api/lines"))[0]
+    assert line["erp_doc_no"] == "QTCK-ADT-26110009" and line["status"] == "S0" and line["qty"] == "5"
+    org.ok(org.post("a1", f"/api/lines/{line['id']}/sign", {"photos": [org.photo("a1")]}))
+    org.ok(org.post("keeper", "/api/recon/run"))
+    assert not [d for d in org.ok(org.get("fin", "/api/recon/diffs")) if d["diff"] != "0"]

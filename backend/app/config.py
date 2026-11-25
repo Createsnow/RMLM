@@ -65,8 +65,9 @@ class Settings:
         self.k3_lcid: int = _int("K3_LCID", 2052)  # 2052 = 简体中文
         self.k3_use_org: str = _env("K3_USE_ORG", "100").strip()  # 使用组织编码，100 = 深圳爱德泰
         # 研发领料在金蝶里的单据类型（其他出库单 STK_MisDelivery 的单据类型名称或编码，逗号分隔可配多个）。
+        # 默认两类都属于研发物料管控：研发测试其他出库单、客供领料其他出库单（2026-11-25 业务补充）。
         # 只自动拉这些类型：全公司的其他出库单很多，不加区分会全部进对账差异
-        self.k3_ll_bill_types: list[str] = [t.strip() for t in _env("K3_LL_BILL_TYPES", "研发测试其他出库单").split(",")
+        self.k3_ll_bill_types: list[str] = [t.strip() for t in _env("K3_LL_BILL_TYPES", "研发测试其他出库单,客供领料其他出库单").split(",")
                                             if t.strip()]
         # 登录 / 查询 / 查看单据的超时（秒）；旧配置 K3_TIMEOUT 仍可用，作为查询超时的默认值
         self.k3_login_timeout: int = _int("K3_LOGIN_TIMEOUT", 30)
