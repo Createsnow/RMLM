@@ -134,7 +134,8 @@ def recent_events(db: Session, lines: list[LedgerLine], users: dict, mats: dict,
     for e in evs:
         l = by_id[e.line_id]
         m = mats[l.material_id]
-        where = (locs.get(e.location_id) if e.location_id else None) or (users[e.to_user_id].name if e.to_user_id else None)
+        where = ((locs.get(e.location_id) if e.location_id else None) or (e.extra or {}).get("place")
+                 or (users[e.to_user_id].name if e.to_user_id else None))
         erp = None
         if e.etype == "SIGN" and l.erp_line_id:
             erp = db.get(ErpLine, l.erp_line_id).doc.no

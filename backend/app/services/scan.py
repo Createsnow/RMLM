@@ -3,8 +3,8 @@
 一个入口依次识别：物料码 → ERP 单据号 → 库位码 → 申请号 → 仓储系统里的条码（实时查询，放最后，免得每次扫单号都调仓储）。
 - 已绑定的物料码：直接带出该行；已拆分替换（B4）的旧码拒绝，提示扫新码。
 - 中台还没有、仓储系统里有的条码：列出本人名下同物料、待签收的行（有出库单号时按单号对），点开后带着这个码签收。
-- ERP 单据号（选单号路径）：列出该单各行对应的领用行；签收仍逐行调用 /lines/{id}/sign，
-  没有整单签收的接口——"必须逐行确认，不许整单全选"。
+- ERP 单据号（选单号路径）：列出该单各行对应的领用行；可逐行签收（/lines/{id}/sign），
+  一人领整单时也可整单批量签收（/lines/batch-sign，2026-11 业务确认），两条路同一套校验。
 - 库位码：列出放在该库位 / 工位 / 报废箱的在制行。
 - 申请号：返回申请 id，由前端打开申请详情（详情接口自带权限校验）。
 """
@@ -104,7 +104,7 @@ def _doc(db: Session, viewer: User, doc: ErpDoc) -> dict:
     return {"kind": "doc", "code": doc.no,
             "doc": {"id": doc.id, "no": doc.no, "doc_type": doc.doc_type, "doc_date": doc.doc_date.isoformat(),
                     "posted": doc.posted},
-            "rows": rows, "hidden": hidden,
+            "rows": rows, "hidden": hidden, "sign_needs_codes": wms.enabled(),
             "to_sign": sum(1 for r in rows for l in r["lines"] if l["can_sign"])}
 
 

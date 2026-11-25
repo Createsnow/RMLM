@@ -322,7 +322,14 @@ class SplitIn(PhotoIn):
 
 
 class LocIn(PhotoIn):
-    location_id: int
+    location_id: int | None = None
+    dest: str = "D04"  # D04 WIP 暂存（选库位码）/ D08 委外加工 / D09 展会·出差（填临时位置）
+    location_text: str | None = None  # 外出的临时位置（自定义文本）
+
+
+class BatchSignIn(PhotoIn):
+    line_ids: list[int]
+    codes: list[str] = []  # 已接仓储时：整单扫到的全部仓储条码，系统按物料 / 出库行号分到各行
 
 
 class TransferIn(BaseModel):
@@ -364,9 +371,19 @@ def _done(db: Session, user: User, line: LedgerLine, extra: dict | None = None) 
 @router.post("/lines/{lid}/sign")
 def sign(lid: int, body: SignIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
     line = _line(db, user, lid)
-    lines = lineops.sign(db, line, user, check_photos(db, body.photos), body.codes)
+    lines = lineops.sign(db, line, user, check_photos(db, body.photos), body.codes, note=body.note)
     return _done(db, user, line, {"lines": [{"id": l.id, "code": l.code, "qty": s(l.qty)} for l in lines]}
                  if len(lines) > 1 else None)
+
+
+@router.post("/lines/batch-sign")
+def batch_sign(body: BatchSignIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """整单批量签收：一人领整单时一次确认本人名下、同一张已过账单据上的多条待签收行。"""
+    for lid in body.line_ids:
+        _line(db, user, lid)
+    lines = lineops.batch_sign(db, body.line_ids, user, check_photos(db, body.photos), body.codes, note=body.note)
+    db.flush()
+    return {"signed": len(lines), "lines": [{"id": l.id, "code": l.code, "qty": s(l.qty)} for l in lines]}
 
 
 @router.get("/wms/barcodes/{code}")
@@ -405,14 +422,16 @@ def split(lid: int, body: SplitIn, user: User = Depends(current_user), db: Sessi
 @router.post("/lines/{lid}/hold")
 def hold(lid: int, body: LocIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
     line = _line(db, user, lid)
-    lineops.hold(db, line, user, body.location_id, body.note, check_photos(db, body.photos))
+    lineops.hold(db, line, user, body.location_id, body.note, check_photos(db, body.photos), dest=body.dest,
+                 location_text=body.location_text)
     return _done(db, user, line)
 
 
 @router.post("/lines/{lid}/move")
 def move(lid: int, body: LocIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
     line = _line(db, user, lid)
-    lineops.move(db, line, user, body.location_id, body.note, check_photos(db, body.photos))
+    lineops.move(db, line, user, body.location_id, body.note, check_photos(db, body.photos),
+                 location_text=body.location_text)
     return _done(db, user, line)
 
 

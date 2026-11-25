@@ -29,7 +29,7 @@
         <el-form-item label="数量" required><el-input-number v-model="f.qty" :min="0" :max="+line.balance" :precision="3" :step="1" style="width: 100%" /></el-form-item>
         <el-form-item v-if="!f.is_loss" label="去向" required>
           <el-radio-group v-model="f.dest">
-            <el-radio-button v-for="d in dictOptions('DEST', d => ['D01','D02','D03'].includes(d.code))" :key="d.code" :value="d.code">{{ d.name }}</el-radio-button>
+            <el-radio-button v-for="d in dictOptions('DEST', d => USE_DESTS.includes(d.code))" :key="d.code" :value="d.code">{{ d.name }}</el-radio-button>
           </el-radio-group>
         </el-form-item>
         <el-form-item v-else label="损耗原因" required>
@@ -38,7 +38,7 @@
           </el-select>
         </el-form-item>
         <el-form-item v-if="!f.is_loss && f.dest === 'D01'" label="出货单号" required>
-          <el-input v-model="f.ship_no" placeholder="交付出货 / 展会对应的出货单号" />
+          <el-input v-model="f.ship_no" placeholder="交付出货对应的出货单号" />
         </el-form-item>
         <el-form-item v-if="!f.is_loss && f.dest === 'D03'" label="产线工位" required>
           <el-select v-model="f.station_id" filterable style="width: 100%" placeholder="选择产线工位位置码">
@@ -46,6 +46,8 @@
           </el-select>
         </el-form-item>
         <div v-if="!f.is_loss && f.dest === 'D02'" class="muted">送实验室后 30 天内须在物料详情里回填实验结论，超期进预警。</div>
+        <div v-if="!f.is_loss && f.dest === 'D10'" class="muted">外部送样不再收回，扣减结存；请在下方说明里写收样方（客户 / 单位、联系人）。</div>
+        <div v-if="!f.is_loss" class="muted">委外加工、展会 / 出差不扣结存，请用「外出」登记。</div>
       </template>
 
       <template v-if="kind === 'split'">
@@ -69,13 +71,34 @@
         <div class="muted" style="margin-top: 6px">原码提交后立即失效，余量也会换新码；物料码最多三层。</div>
       </template>
 
+      <template v-if="kind === 'out'">
+        <el-form-item label="外出去向" required>
+          <el-radio-group v-model="f.out_dest">
+            <el-radio-button v-for="d in dictOptions('DEST', d => ['D08','D09'].includes(d.code))" :key="d.code" :value="d.code">{{ d.name }}</el-radio-button>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item label="临时位置" required>
+          <el-input v-model="f.location_text" maxlength="128" placeholder="如：上海光博会 3 号馆 A12 / 东莞某某加工厂" />
+        </el-form-item>
+        <div class="muted">外出不扣结存，只改位置，持有人仍是你；回来后用「更新位置」选回固定库位，或直接登记使用 / 退库 / 报废。</div>
+      </template>
+
       <template v-if="kind === 'hold' || kind === 'move'">
-        <el-form-item label="库位 / 工位" required>
+        <el-form-item v-if="kind === 'move' && line.out_dest" label="位置类型">
+          <el-radio-group v-model="f.use_text">
+            <el-radio-button :value="false">回到固定库位</el-radio-button>
+            <el-radio-button :value="true">换临时位置</el-radio-button>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item v-if="f.use_text" label="临时位置" required>
+          <el-input v-model="f.location_text" maxlength="128" placeholder="如：深圳展会 B 馆 / 出差北京客户现场" />
+        </el-form-item>
+        <el-form-item v-else label="库位 / 工位" required>
           <el-select v-model="f.location_id" filterable style="width: 100%">
             <el-option v-for="l in locations" :key="l.id" :value="l.id" :label="`${l.code} ${l.name}`" />
           </el-select>
         </el-form-item>
-        <div class="muted">暂存只改位置，不扣结存。</div>
+        <div class="muted">暂存只改位置，不扣结存。库位只能从库位码中选；自定义临时位置只用于外出（委外加工、展会 / 出差）。</div>
       </template>
 
       <template v-if="kind === 'transfer'">
@@ -137,8 +160,9 @@
         <div class="muted">由持有人的直属上级审核。</div>
       </template>
 
-      <el-form-item v-if="['consume','split','hold','move','return','scrap','qconfirm','sign'].includes(kind)" label="说明">
-        <el-input v-model="f.note" :placeholder="f.loss_reason === 'L5' ? '损耗原因为「其他」时必须写说明' : '选填'" />
+      <el-form-item v-if="['consume','split','hold','out','move','return','scrap','qconfirm','sign'].includes(kind)" label="说明"
+                    :required="kind === 'consume' && !f.is_loss && f.dest === 'D10'">
+        <el-input v-model="f.note" :placeholder="notePlaceholder" />
       </el-form-item>
       <el-form-item v-if="needPhoto || ['move','return','qconfirm'].includes(kind)" :label="needPhoto ? '现场照片（必拍）' : '现场照片（选填）'" :required="needPhoto">
         <PhotoPicker v-model="f.photos" />
@@ -170,13 +194,16 @@ const locations = ref([])
 const boxes = ref([])
 const stations = ref([])
 const f = reactive({})
-const titles = { sign: '签收', consume: '使用登记', split: '拆分换码', hold: 'WIP 暂存', move: '更新位置', transfer: '转交他人',
+const USE_DESTS = ['D01', 'D02', 'D03', 'D10']
+const titles = { sign: '签收', consume: '使用登记', split: '拆分换码', hold: 'WIP 暂存', out: '外出（委外加工 / 展会 / 出差）', move: '更新位置', transfer: '转交他人',
   return: '退库', scrap: '报废', qconfirm: '季度在用确认', renew: '长周期续期', due_change: '申请改归还日' }
-const needPhoto = computed(() => ['sign', 'consume', 'split', 'hold', 'scrap'].includes(kind.value))
+const needPhoto = computed(() => ['sign', 'consume', 'split', 'hold', 'out', 'scrap'].includes(kind.value))
 const isProxy = computed(() => store.user && props.line.holder_id !== store.user.id && kind.value !== 'sign')
 const sumPieces = computed(() => +(f.pieces || []).reduce((a, b) => a + (+b || 0), 0).toFixed(3))
 const remainder = computed(() => +(+props.line.balance - sumPieces.value - (+f.loss_qty || 0)).toFixed(3))
 const needCodes = computed(() => !!props.line.actions?.sign_needs_codes)
+const notePlaceholder = computed(() => kind.value === 'consume' && !f.is_loss && f.dest === 'D10' ? '必填：收样方（客户 / 单位、联系人）'
+  : f.loss_reason === 'L5' ? '损耗原因为「其他」时必须写说明' : '选填')
 const codeSum = computed(() => +(f.codes || []).reduce((a, c) => a + (+c.qty || 0), 0).toFixed(3))
 
 async function addCode(code) {
@@ -193,7 +220,7 @@ async function open(k, preset = {}) {
   Object.keys(f).forEach(key => delete f[key])
   Object.assign(f, { qty: +props.line.balance, dest: 'D01', is_loss: false, loss_reason: null, note: '', photos: [],
     pieces: [0], loss_qty: 0, location_id: null, to_user_id: null, reason: '', mode: 'RESIDUE', box: null, months: 6, new_date: null,
-    codes: [], ship_no: '', station_id: null, external: false, external_name: '' })
+    codes: [], ship_no: '', station_id: null, external: false, external_name: '', out_dest: 'D09', location_text: '', use_text: false })
   if (k === 'sign' && preset.code && needCodes.value) addCode(preset.code).catch(() => {})
   if (k === 'consume') f.qty = 0
   visible.value = true
@@ -210,7 +237,9 @@ async function submit() {
       ship_no: f.dest === 'D01' ? f.ship_no : null, location_id: f.dest === 'D03' ? f.station_id : null }],
     split: () => ['split', { pieces: f.pieces.filter(p => +p > 0), loss_qty: f.loss_qty, loss_reason: f.loss_reason, note: f.note, photos: f.photos }],
     hold: () => ['hold', { location_id: f.location_id, note: f.note, photos: f.photos }],
-    move: () => ['move', { location_id: f.location_id, note: f.note, photos: f.photos }],
+    out: () => ['hold', { dest: f.out_dest, location_text: f.location_text, note: f.note, photos: f.photos }],
+    move: () => ['move', f.use_text ? { location_text: f.location_text, note: f.note, photos: f.photos }
+      : { location_id: f.location_id, note: f.note, photos: f.photos }],
     transfer: () => ['transfer', f.external ? { external_name: f.external_name, reason: f.reason } : { to_user_id: f.to_user_id, reason: f.reason }],
     return: () => ['return', { qty: f.qty, note: f.note, photos: f.photos }],
     scrap: () => ['scrap', { mode: f.mode, qty: f.qty, reason: f.reason, box: f.box, note: f.note, photos: f.photos }],

@@ -39,6 +39,7 @@
         <el-button v-if="l.actions.consume" type="primary" @click="op('consume')">使用 / 损耗</el-button>
         <el-button v-if="l.actions.split" @click="op('split')">拆分换码</el-button>
         <el-button v-if="l.actions.hold" @click="op('hold')">WIP 暂存</el-button>
+        <el-button v-if="l.actions.go_out" @click="op('out')">外出（委外 / 展会 / 出差）</el-button>
         <el-button v-if="l.actions.move" @click="op('move')">更新位置</el-button>
         <el-button v-if="l.actions.transfer" @click="op('transfer')">转交</el-button>
         <el-button v-if="l.actions.return" @click="op('return')">退库</el-button>

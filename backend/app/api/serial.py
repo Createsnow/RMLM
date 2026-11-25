@@ -113,6 +113,13 @@ def line_out(db: Session, line: LedgerLine, viewer: User, c=None, full: bool = F
         flags.append("锁定")
     if any(e.etype == "TRANSFER_REQ" and e.status == "PENDING" and not e.to_user_id for e in c.events):
         flags.append("外部·待认领")
+    out = None
+    if line.location_text and st == "S3":
+        from ..services.lineops import out_dest
+
+        out = out_dest(db, line)
+        if out:
+            flags.append("外出·" + {"D08": "委外加工", "D09": "展会 / 出差"}.get(out, out))
     wms_bound = db.scalar(select(MaterialCode.id).where(MaterialCode.code == line.code,
                                                         MaterialCode.source == "WMS")) is not None
     d = {
@@ -121,7 +128,8 @@ def line_out(db: Session, line: LedgerLine, viewer: User, c=None, full: bool = F
         "project_id": p.id, "project": p.code, "project_name": p.name, "customer_code": p.customer_code,
         "qty": s(D(line.qty)), "unit_price": s(line.unit_price), "user": db.get(User, line.user_id).name,
         "user_id": line.user_id, "holder": holder.name, "holder_id": holder.id,
-        "location": loc.name if loc else None, "location_id": line.location_id, "due_date": s(line.due_date),
+        "location": loc.name if loc else line.location_text, "location_id": line.location_id,
+        "location_text": line.location_text, "out_dest": out, "due_date": s(line.due_date),
         "long_cycle_max": s(line.long_cycle_max), "signed": line.signed, "status": st,
         "status_name": ledger.STATUS_NAMES[st], "flags": flags, "overdue": st == "S5", "locked": line.locked,
         "consumed": s(c.consumed), "loss": s(c.loss), "split_out": s(c.split_out), "returned": s(c.returned),
@@ -155,7 +163,7 @@ def line_out(db: Session, line: LedgerLine, viewer: User, c=None, full: bool = F
         "operator": uname(e.operator_id), "holder": uname(e.holder_id), "is_proxy": e.is_proxy,
         "photos": e.photos or [], "status": e.status, "reverses_id": e.reverses_id, "reversed": e.id in reversed_ids,
         "extra": e.extra, "code": e.code, "created_at": s(e.created_at),
-        "location": (db.get(Location, e.location_id).name if e.location_id else None),
+        "location": (db.get(Location, e.location_id).name if e.location_id else (e.extra or {}).get("place")),
     } for e in c.events]
     codes = list(db.scalars(select(MaterialCode).where(MaterialCode.line_id == line.id).order_by(MaterialCode.id)))
     d["codes"] = [{"code": k.code, "layer": k.layer, "parent_code": k.parent_code, "qty_init": s(k.qty_init),
@@ -180,6 +188,7 @@ def line_out(db: Session, line: LedgerLine, viewer: User, c=None, full: bool = F
         "sign_needs_codes": (not line.signed) and settings.wms_enabled,
         "consume": can and active, "split": can and active, "return": can and active, "scrap": can and active,
         "hold": can and active and st not in ("S3", "S5"), "move": can and st == "S3",
+        "go_out": can and active and st != "S5",  # 外出（委外加工 / 展会·出差），暂存中也可以带出去
         "transfer": can and active and pending_transfer is None,
         "confirm_transfer": bool(pending_transfer and pending_transfer.to_user_id
                                  and pending_transfer.to_user_id == viewer.id),

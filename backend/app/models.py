@@ -248,6 +248,8 @@ class LedgerLine(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))  # 领用人
     holder_id: Mapped[int] = mapped_column(ForeignKey("users.id"))  # 当前持有人
     location_id: Mapped[int | None] = mapped_column(ForeignKey("location.id"))
+    # 外出（D08 委外加工 / D09 展会·出差）时的临时位置，自定义文本；回到固定库位后清空
+    location_text: Mapped[str | None] = mapped_column(String(128))
     due_date: Mapped[date] = mapped_column(Date)
     long_cycle: Mapped[bool] = mapped_column(Boolean, default=False)
     long_cycle_lapsed: Mapped[bool] = mapped_column(Boolean, default=False)  # 季度未确认 → 按标准类

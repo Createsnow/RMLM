@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .. import clock
-from ..dicts import USE_DESTS
+from ..dicts import HOLD_DESTS, OUT_DESTS, USE_DESTS
 from ..errors import BizError, forbid
 from ..models import ErpLine, Event, LedgerLine, Location, Material, MaterialCode, Project, User
 from ..perms import active_delegates, default_approver, has_role, proxy_check
@@ -70,19 +70,31 @@ def _check_qty(qty, balance: Decimal) -> Decimal:
 
 
 # ------------------------------------------------------------------ 签收
-def sign(db: Session, line: LedgerLine, op: User, photos: list[int], codes: list[str] | None = None) -> list[LedgerLine]:
-    """本人签收。已接仓储时必须扫实物上的仓储条码：一个码挂一条领用行，扫了几个码就分成几条行，
-    各码数量合计须等于本行数量。返回签收后的全部行（第一条是原行）。"""
+def _sign_precheck(db: Session, line: LedgerLine, op: User) -> ErpLine | None:
     _guard(db, line, need_signed=False)
     if line.signed:
-        raise BizError("该行已签收")
+        raise BizError(f"{line.code} 已签收")
     if op.id != line.holder_id:
         raise forbid("签收必须由使用人本人操作，不允许代登")
     erp = db.get(ErpLine, line.erp_line_id) if line.erp_line_id else None
     if not line.urgent and (not erp or not erp.doc.posted):
         raise BizError("ERP 单据尚未过账，不能签收")
+    return erp
+
+
+def sign(db: Session, line: LedgerLine, op: User, photos: list[int], codes: list[str] | None = None,
+         checked: list | None = None, batch: str | None = None, note: str | None = None) -> list[LedgerLine]:
+    """本人签收。已接仓储时必须扫实物上的仓储条码：一个码挂一条领用行，扫了几个码就分成几条行，
+    各码数量合计须等于本行数量。返回签收后的全部行（第一条是原行）。
+    checked：整单签收时已核对好的条码（不再重复查仓储）；batch：整单签收的单据号（记在签收事件上）。"""
+    erp = _sign_precheck(db, line, op)
     _require_photos(photos, "签收")
-    scanned = check_sign_codes(db, line, codes or [], erp) if wms.enabled() else None
+    if not wms.enabled():
+        scanned = None
+    elif checked is not None:
+        scanned = checked
+    else:
+        scanned = check_sign_codes(db, line, codes or [], erp)
     now = clock.now()
     lines = [line]
     if scanned:
@@ -97,20 +109,38 @@ def sign(db: Session, line: LedgerLine, op: User, photos: list[int], codes: list
         db.flush()
     for ln in lines:
         ln.signed, ln.signed_at = True, now
-        _event(db, ln, "SIGN", op, qty=ln.qty, photos=photos,
-               extra={"barcodes": [b.barcode for b in scanned]} if scanned and ln is line and len(scanned) > 1 else None)
+        extra = {}
+        if scanned and ln is line and len(scanned) > 1:
+            extra["barcodes"] = [b.barcode for b in scanned]
+        if batch:
+            extra["batch_doc"] = batch
+        _event(db, ln, "SIGN", op, qty=ln.qty, photos=photos, note=(note or "").strip() or None, extra=extra or None)
     close_todos(db, "line", line.id, ("SIGN",))
     return lines
 
 
-def check_sign_codes(db: Session, line: LedgerLine, codes: list[str], erp: ErpLine | None) -> list:
-    """逐个向仓储核对扫到的条码；任何一个不对，整笔签收不生效。"""
+def _check_barcode(db: Session, line: LedgerLine, bc, erp: ErpLine | None, mat_code: str) -> None:
+    """一个仓储条码能否签到这条行：已出库、物料一致、出库单号一致、数量 > 0。"""
+    c = bc.barcode
+    if bc.material_code != mat_code:
+        raise BizError(f"条码 {c} 是物料 {bc.material_code}，与本行物料 {mat_code} 不符")
+    if bc.status != wms.OUTBOUND:
+        if bc.status == "IN_STOCK":
+            raise BizError(f"仓储系统显示条码 {c} 仍在库，请先在仓储系统做出库")
+        raise BizError(f"条码 {c} 在仓储系统中为「{wms.STATUS_NAMES.get(bc.status, bc.status)}」，不能签收")
+    if erp is not None and bc.out_doc_no and bc.out_doc_no != erp.doc.no:
+        raise BizError(f"条码 {c} 出库到 {bc.out_doc_no}，不是本行的单据 {erp.doc.no}")
+    if bc.qty <= 0:
+        raise BizError(f"条码 {c} 数量为 0")
+
+
+def _lookup_codes(db: Session, codes: list[str]) -> list:
+    """去重、查是否已被中台使用、逐个向仓储查询。"""
     codes = [c.strip() for c in codes if c and c.strip()]
     if not codes:
         raise BizError("请扫描实物上的仓储条码后再签收")
     if len(set(codes)) != len(codes):
         raise BizError("同一个条码扫了两次")
-    mat = db.get(Material, line.material_id)
     out = []
     for c in codes:
         if db.scalar(select(MaterialCode.id).where(MaterialCode.code == c)):
@@ -118,21 +148,66 @@ def check_sign_codes(db: Session, line: LedgerLine, codes: list[str], erp: ErpLi
         bc = wms.lookup(c)
         if bc is None:
             raise BizError(f"仓储系统查不到条码 {c}")
-        if bc.material_code != mat.code:
-            raise BizError(f"条码 {c} 是物料 {bc.material_code}，与本行物料 {mat.code} 不符")
-        if bc.status != wms.OUTBOUND:
-            if bc.status == "IN_STOCK":
-                raise BizError(f"仓储系统显示条码 {c} 仍在库，请先在仓储系统做出库")
-            raise BizError(f"条码 {c} 在仓储系统中为「{wms.STATUS_NAMES.get(bc.status, bc.status)}」，不能签收")
-        if erp is not None and bc.out_doc_no and bc.out_doc_no != erp.doc.no:
-            raise BizError(f"条码 {c} 出库到 {bc.out_doc_no}，不是本行的单据 {erp.doc.no}")
-        if bc.qty <= 0:
-            raise BizError(f"条码 {c} 数量为 0")
         out.append(bc)
-    total = sum((b.qty for b in out), D(0))
+    return out
+
+
+def _check_total(line: LedgerLine, scanned: list) -> None:
+    total = sum((b.qty for b in scanned), D(0))
     if total != D(line.qty):
-        raise BizError(f"扫到的条码数量合计 {total}，与本行数量 {D(line.qty)} 不一致；"
+        raise BizError(f"{line.code}：扫到的条码数量合计 {total}，与本行数量 {D(line.qty)} 不一致；"
                        f"一批一码只领了一部分的，请仓库先在仓储系统按实发数量拆码")
+
+
+def check_sign_codes(db: Session, line: LedgerLine, codes: list[str], erp: ErpLine | None) -> list:
+    """逐个向仓储核对扫到的条码；任何一个不对，整笔签收不生效。"""
+    mat = db.get(Material, line.material_id)
+    out = _lookup_codes(db, codes)
+    for bc in out:
+        _check_barcode(db, line, bc, erp, mat.code)
+    _check_total(line, out)
+    return out
+
+
+def batch_sign(db: Session, line_ids: list[int], op: User, photos: list[int], codes: list[str] | None = None,
+               note: str | None = None) -> list[LedgerLine]:
+    """整单批量签收：一人领整单时，一次确认这张单据上本人名下的多条待签收行（同一套校验，整笔成功或整笔不生效）。
+    已接仓储时一次扫完整单的仓储条码，系统按物料（有出库行号时按行号）把码分到各行，每行合计须等于本行数量。"""
+    ids = list(dict.fromkeys(int(i) for i in line_ids or []))
+    if not ids:
+        raise BizError("请选择要签收的行")
+    lines = [db.get(LedgerLine, i) for i in ids]
+    if any(l is None for l in lines):
+        raise BizError("领用行不存在")
+    erps = {}
+    for l in lines:
+        erps[l.id] = _sign_precheck(db, l, op)
+    docs = {e.doc.no for e in erps.values() if e is not None}
+    if len(docs) != 1 or any(e is None for e in erps.values()):
+        raise BizError("整单签收只能签同一张已过账 ERP 单据上的行；紧急领用请逐行签收")
+    doc_no = docs.pop()
+    _require_photos(photos, "签收")
+    assigned: dict[int, list] = {l.id: [] for l in lines}
+    if wms.enabled():
+        mats = {l.id: db.get(Material, l.material_id).code for l in lines}
+        for bc in _lookup_codes(db, codes or []):
+            cands = [l for l in lines if mats[l.id] == bc.material_code]
+            if bc.out_line_no is not None:
+                cands = [l for l in cands if erps[l.id].line_no == bc.out_line_no]
+            if not cands:
+                raise BizError(f"条码 {bc.barcode}（物料 {bc.material_code}）不属于本次要签收的行")
+            if len(cands) > 1:
+                nos = "、".join(str(erps[l.id].line_no) for l in cands)
+                raise BizError(f"条码 {bc.barcode} 同时对应本单第 {nos} 行（同一物料），系统分不清，请这几行逐行签收")
+            _check_barcode(db, cands[0], bc, erps[cands[0].id], mats[cands[0].id])
+            assigned[cands[0].id].append(bc)
+        for l in lines:
+            if not assigned[l.id]:
+                raise BizError(f"第 {erps[l.id].line_no} 行（{mats[l.id]}）还没扫仓储条码")
+            _check_total(l, assigned[l.id])
+    out = []
+    for l in lines:
+        out += sign(db, l, op, photos, checked=assigned[l.id] if wms.enabled() else None, batch=doc_no, note=note)
     return out
 
 
@@ -167,7 +242,12 @@ def consume(db: Session, line: LedgerLine, op: User, qty, dest: str | None, is_l
         if loss_reason == "L5" and not (note or "").strip():
             raise BizError("损耗原因为「其他」时必须写说明")
     elif dest not in USE_DESTS:
-        raise BizError("使用登记的去向只能选 D01 项目成品 / D02 可靠性实验 / D03 产线试用")
+        raise BizError("使用登记的去向只能选 D01 项目成品 / D02 可靠性实验 / D03 产线试用 / D10 外部送样；"
+                       "委外加工、展会 / 出差不扣结存，请用「暂存 / 外出」登记")
+    elif dest == "D10":
+        # 外部送样：料不再收回，必须写清楚送给了谁
+        if not (note or "").strip():
+            raise BizError("去向为 D10 外部送样时必须在说明里写收样方（客户 / 单位、联系人）")
     elif dest == "D01":
         # 蓝图 4.1：做成样品或成品交付出货，须关联项目与出货单
         if not (ship_no or "").strip():
@@ -305,32 +385,67 @@ def _location(db: Session, location_id: int, kinds: tuple[str, ...] = ("STOCK", 
     return loc
 
 
-def hold(db: Session, line: LedgerLine, op: User, location_id: int, note: str | None, photos: list[int]) -> Event:
+def _place_text(text: str | None) -> str:
+    t = (text or "").strip()
+    if not t:
+        raise BizError("请填写临时位置，如：上海光博会 3 号馆 A12 / 东莞某某加工厂")
+    if len(t) > 128:
+        raise BizError("临时位置最多 128 个字")
+    return t
+
+
+def out_dest(db: Session, line: LedgerLine) -> str | None:
+    """行当前处于"外出"（委外加工 / 展会·出差）时返回去向编码，否则 None。"""
+    if not line.location_text:
+        return None
+    last = db.scalar(select(Event).where(Event.line_id == line.id, Event.etype == "HOLD", Event.status == "EFFECTIVE")
+                     .order_by(Event.id.desc()).limit(1))
+    return last.dest if last is not None and last.dest in OUT_DESTS else None
+
+
+def hold(db: Session, line: LedgerLine, op: User, location_id: int | None, note: str | None, photos: list[int],
+         dest: str = "D04", location_text: str | None = None) -> Event:
+    """暂存（D04，选固定库位码）或外出（D08 委外加工 / D09 展会·出差，填临时位置文本）。都不动结存。"""
     _guard(db, line)
     proxy = _operator(db, line, op)
+    if dest not in HOLD_DESTS:
+        raise BizError("暂存 / 外出的去向只能选 D04 WIP 暂存 / D08 委外加工 / D09 展会 / 出差")
     c = ledger.load_one(db, line, lock=True)
     st = ledger.status_of(line, c)
     if st == "S5":
-        raise BizError("超期未结案的行不能暂存，请先退库、报废或申请改归还日")
-    if st == "S3":
+        raise BizError("超期未结案的行不能暂存或外出，请先退库、报废或申请改归还日")
+    if st == "S3" and dest == "D04" and not line.location_text:
         raise BizError("已在暂存中，换位置请用「更新位置」")
     if c.balance <= 0:
         raise BizError("结存为 0，无需暂存")
-    loc = _location(db, location_id)
-    _require_photos(photos, "暂存")
-    line.location_id = loc.id
-    return _event(db, line, "HOLD", op, proxy, location_id=loc.id, dest="D04", note=note, photos=photos)
+    _require_photos(photos, "暂存 / 外出")
+    if dest == "D04":
+        loc = _location(db, location_id)
+        line.location_id, line.location_text = loc.id, None
+        return _event(db, line, "HOLD", op, proxy, location_id=loc.id, dest="D04", note=note, photos=photos)
+    place = _place_text(location_text)
+    line.location_id, line.location_text = None, place
+    return _event(db, line, "HOLD", op, proxy, dest=dest, note=note, photos=photos, extra={"place": place})
 
 
-def move(db: Session, line: LedgerLine, op: User, location_id: int, note: str | None, photos: list[int] | None) -> Event:
+def move(db: Session, line: LedgerLine, op: User, location_id: int | None, note: str | None, photos: list[int] | None,
+         location_text: str | None = None) -> Event:
+    """更新位置：选固定库位码（外出回来也用这个）；外出期间换临时位置可填文本。"""
     _guard(db, line)
     proxy = _operator(db, line, op)
     c = ledger.load_one(db, line, lock=True)
     if ledger.status_of(line, c) != "S3":
-        raise BizError("只有暂存中的行可以更新位置")
-    loc = _location(db, location_id)
-    line.location_id = loc.id
-    return _event(db, line, "MOVE", op, proxy, location_id=loc.id, note=note, photos=photos or None)
+        raise BizError("只有暂存 / 外出中的行可以更新位置")
+    if location_id:
+        loc = _location(db, location_id)
+        line.location_id, line.location_text = loc.id, None
+        return _event(db, line, "MOVE", op, proxy, location_id=loc.id, note=note, photos=photos or None)
+    od = out_dest(db, line)
+    if od is None:
+        raise BizError("暂存位置请从库位码中选择；自定义临时位置只用于委外加工、展会 / 出差")
+    place = _place_text(location_text)
+    line.location_text = place
+    return _event(db, line, "MOVE", op, proxy, dest=od, note=note, photos=photos or None, extra={"place": place})
 
 
 # ------------------------------------------------------------------ 转交
