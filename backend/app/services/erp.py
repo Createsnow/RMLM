@@ -122,6 +122,8 @@ def warehouse_receive(db: Session, op: User, doc: ErpDoc) -> ErpDoc:
     require_role(op, "WAREHOUSE")
     if doc.doc_type not in ("TL", "BF"):
         raise BizError("只有退料单 / 报废单需要仓库确认实物")
+    if not doc.posted:
+        raise BizError(f"单据 {doc.no} 在金蝶尚未过账，过账后再确认实物")
     doc.received, doc.received_by, doc.received_at = True, op.id, clock.now()
     return doc
 
@@ -145,8 +147,8 @@ def suggestions(db: Session) -> list[dict]:
                 for it in r.items:
                     if it.material_id != ln.material_id:
                         continue
-                    if issued_qty(db, it) >= D(it.qty):
-                        continue
+                    if issued_qty(db, it) + D(ln.qty) > D(it.qty):
+                        continue  # 已开够或这张单会超出申请数量：不作为建议
                     out.append({"erp_line_id": ln.id, "erp_doc_no": doc.no, "erp_line_no": ln.line_no,
                                 "req_item_id": it.id, "req_no": r.no, "qty": str(ln.qty)})
     return out
@@ -191,9 +193,12 @@ def auto_bind(db: Session) -> int:
                     continue
                 lines = list(db.scalars(select(LedgerLine).where(LedgerLine.req_item_id == it.id,
                                                                  LedgerLine.level == 1)))
-                if issued_qty(db, it) >= D(it.qty):
+                issued = issued_qty(db, it)
+                if issued >= D(it.qty):
                     continue  # 已开够申请数量；分批到货没开够的，下一张单仍可自动绑定
                 urgent = next((x for x in lines if x.urgent and x.erp_line_id is None), None)
+                if urgent is None and issued + D(ln.qty) > D(it.qty):
+                    continue  # 这张单超出申请剩余数量：不自动绑定，24 小时后派"ERP 有单无明细"由领料专员核对
                 if r.status == "APPROVED" or urgent is not None:
                     cands.append(it)
         if len(cands) == 1:
@@ -238,6 +243,12 @@ def _bind(db: Session, op: User | None, item: ReqItem, erp: ErpLine) -> LedgerLi
         return urgent_lines[0]
     if req.status != "APPROVED":
         raise BizError("申请未经直属上级审核，不能开单")
+    rest = D(item.qty) - issued_qty(db, item)
+    if rest <= 0:
+        raise BizError(f"申请 {req.no} 的这项物料已开够申请数量 {D(item.qty)}，不能再绑定")
+    if D(erp.qty) > rest:
+        raise BizError(f"单据行数量 {D(erp.qty)} 超过申请剩余未开数量 {rest}：请在金蝶核对开单数量，"
+                       f"或由申请人补提申请")
     line = reqsvc._new_line(db, op, req, item, qty=erp.qty, erp_line=erp)
     close_todos(db, "erpline", erp.id)
     if erp.doc.posted:

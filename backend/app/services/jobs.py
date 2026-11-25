@@ -161,6 +161,10 @@ def daily(db: Session) -> dict:
     # 长周期季度确认：季末 7 天内未确认 → 按标准类处理
     for t in db.scalars(select(Todo).where(Todo.kind == "QCONFIRM", Todo.state == "OPEN", Todo.due_at < now)):
         line = db.get(LedgerLine, t.ref_id)
+        if line and ledger.load_one(db, line).balance <= 0:
+            # 待确认期间已用完 / 退库：无需再确认，关掉待办，也不按标准类处理
+            t.state, t.done_at = "DONE", now
+            continue
         if line and not line.long_cycle_lapsed:
             line.long_cycle_lapsed = True
             notify(db, line.holder_id, f"{line.code} 未按期做季度在用确认，已按标准类超期规则处理", "line", line.id)

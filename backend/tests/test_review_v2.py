@@ -1,5 +1,5 @@
 """第二轮代码检查（2026-11-25）发现的问题的回归测试：
-报废批次含已冲销事件后无法挂单、关账后仍能复核通过冲销、补审被驳回的紧急行永远停在"待单据处置"、
+报废批次含已冲销事件后无法挂单、关账后仍能复核通过冲销、补审被驳回的紧急行口径（必须审核通过才算补齐）、
 锁定行上的转交无法拒绝、手工改已关账月份单据的过账状态、报废单据覆盖率把已冲销事件算进分母。"""
 from datetime import datetime
 
@@ -55,14 +55,19 @@ def test_scrap_batch_all_reversed_is_rejected_clearly(org, ref):
 
 
 def test_pending_reversal_cannot_take_effect_after_period_closed(org, ref):
-    """关账后不能冲销该月事件：冲销在关账前发起、关账后才复核的，复核时也必须拦住，只能驳回。"""
+    """关账后不能冲销该月事件：冲销在关账前发起、关账后才复核的，复核时也必须拦住，只能驳回。
+    （第三轮起有待复核冲销时不能关账，正常走不到这里；这里直接写关账记录，验证复核时的兜底校验。）"""
     l1 = issue(org, ref, qty=10)
     org.ok(org.post("a1", f"/api/lines/{l1['id']}/consume",
                     {"qty": 2, "dest": "D02", "photos": [org.photo("a1")]}))
     ev = _event(org, l1["id"], "CONSUME")[0]
     rv = org.ok(org.post("keeper", "/api/reversals", {"event_id": ev["id"], "reason": "误登"}))
     clock.set_now(datetime(2026, 12, 2, 9, 0))
-    org.ok(org.post("fin", "/api/recon/close/2026-11"))
+    from app.models import PeriodClose
+
+    with dbmod.SessionLocal() as db:
+        db.add(PeriodClose(period="2026-11", closed=True))
+        db.commit()
     r = org.post("admin", f"/api/reversals/{rv['id']}/decide", {"approve": True})
     assert r.status_code == 400 and "已关账" in r.json()["detail"]
     assert org.ok(org.get("a1", f"/api/lines/{l1['id']}"))["balance"] == "8"
@@ -71,37 +76,18 @@ def test_pending_reversal_cannot_take_effect_after_period_closed(org, ref):
     assert not any(t["kind"] == "REVERSAL_REVIEW" for t in org.ok(org.get("admin", "/api/todos")))
 
 
-def test_rejected_urgent_line_closes_after_full_return(org, ref):
-    """紧急领用补审被驳回 → 全额退库；补齐领料单、退料单后行应结案（S7），"紧急·待补"标记和待办随之结束，
-    而不是永远停在 S6、待办每天升级到副总。"""
+def test_rejected_urgent_line_stays_pending(org, ref):
+    """业务确认：必须审核通过才算补齐。驳回后即使补挂了领料单，仍是"紧急·待补"，不会结案。"""
     req = make_req(org, ref, urgent=True, urgent_note="组长口头同意")
     line = org.ok(org.post("keeper", f"/api/requisitions/{req['id']}/urgent-handover/{req['items'][0]['id']}"))
     org.ok(org.post("a1", f"/api/lines/{line['id']}/sign", {"photos": [org.photo("a1")]}))
-    clock.set_now(datetime(2026, 11, 3, 10, 0))
-    org.ok(org.post("admin", "/api/admin/jobs/quarter_hour"))
-    assert any(t["kind"] == "URGENT_PENDING" for t in org.ok(org.get("a1", "/api/todos")))
     org.ok(org.post("lead_a", f"/api/requisitions/{req['id']}/decide", {"approve": False, "note": "不该领"}))
-    org.ok(org.post("a1", f"/api/lines/{line['id']}/return", {"qty": 10}))
+    assert any(t["kind"] == "MUST_RETURN" for t in org.ok(org.get("a1", "/api/todos")))
+    assert "紧急·待补" in org.ok(org.get("a1", f"/api/lines/{line['id']}"))["flags"]
     ll = erp_doc(org, "LL", [{"material_code": "M-CABLE", "qty": 10}], remark=req["no"])
     org.ok(org.post("keeper", "/api/erp/bind", {"req_item_id": req["items"][0]["id"],
                                                 "erp_line_id": ll["lines"][0]["id"]}))
-    tl = erp_doc(org, "TL", [{"material_code": "M-CABLE", "qty": 10}])
-    ev = _event(org, line["id"], "RETURN")[0]
-    org.ok(org.post("keeper", "/api/returns/allocate", {"erp_doc_id": tl["id"], "event_ids": [ev["id"]]}))
-    out = org.ok(org.get("a1", f"/api/lines/{line['id']}"))
-    assert out["status"] == "S7", out["status"]
-    assert "紧急·待补" not in out["flags"]
-    assert not any(t["kind"] == "URGENT_PENDING" for t in org.ok(org.get("a1", "/api/todos")))
-
-
-def test_rejected_urgent_without_erp_doc_stays_pending(org, ref):
-    """驳回本身不等于补齐：还没补挂领料单的，仍是"紧急·待补"。"""
-    req = make_req(org, ref, urgent=True, urgent_note="组长口头同意")
-    line = org.ok(org.post("keeper", f"/api/requisitions/{req['id']}/urgent-handover/{req['items'][0]['id']}"))
-    org.ok(org.post("a1", f"/api/lines/{line['id']}/sign", {"photos": [org.photo("a1")]}))
-    org.ok(org.post("lead_a", f"/api/requisitions/{req['id']}/decide", {"approve": False, "note": "不该领"}))
-    out = org.ok(org.get("a1", f"/api/lines/{line['id']}"))
-    assert "紧急·待补" in out["flags"]
+    assert "紧急·待补" in org.ok(org.get("a1", f"/api/lines/{line['id']}"))["flags"]
 
 
 def test_receiver_can_reject_transfer_on_locked_line(org, ref):

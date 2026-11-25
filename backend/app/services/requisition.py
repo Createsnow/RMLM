@@ -110,9 +110,11 @@ def decide(db: Session, op: User, req: Requisition, approve: bool, note: str | N
     close_todos(db, "req", req.id, ("APPROVE",))
     notify(db, req.user_id, f"领料申请 {req.no} 已{'通过' if approve else '驳回'}", "req", req.id)
     lines = list(db.scalars(select(LedgerLine).where(LedgerLine.requisition_id == req.id)))
-    for l in lines:
-        refresh_urgent(db, l)
-        if not approve:  # 紧急领用已交接、补审被驳回 → 全额退库
+    if approve:
+        for l in lines:
+            refresh_urgent(db, l)
+    else:
+        for l in lines:  # 紧急领用已交接、补审被驳回 → 全额退库
             add_todo(db, l.holder_id, "MUST_RETURN", f"申请被驳回，{l.code} 须全额退库", "line", l.id, due_hours=24)
     return req
 
@@ -169,16 +171,19 @@ def _new_line(db: Session, op: User | None, req: Requisition, item: ReqItem, qty
 
 
 def refresh_urgent(db: Session, line: LedgerLine) -> None:
-    """紧急行补齐判定：申请已补审（通过或驳回）+ 已绑定 ERP 单 + ERP 已过账。
-    补审被驳回的，审核这一步也算完成：剩下的"全额退库"由 MUST_RETURN 待办和结存跟踪，
-    退库并挂上退料单后行正常结案（否则永远停在"待单据处置"、紧急待办每天升级）。"""
-    if not line.urgent or line.urgent_resolved:
+    """紧急行补齐判定：申请已审核通过 + 已绑定 ERP 单 + ERP 已过账（2026-11-25 业务确认：必须审核通过才算补齐，
+    驳回不算；口头同意后才会先交接，正常不会出现驳回）。"""
+    if not line.urgent or line.level != 1:  # 拆出的子行跟随父行，不单独判定
         return
     req = db.get(Requisition, line.requisition_id)
     from ..models import ErpLine
 
     erp = db.get(ErpLine, line.erp_line_id) if line.erp_line_id else None
-    if req.status in ("APPROVED", "REJECTED") and erp is not None and erp.doc.posted:
+    ok = req.status == "APPROVED" and erp is not None and erp.doc.posted
+    if ok and not line.urgent_resolved:
         line.urgent_resolved = True
         line.urgent_overdue = False
         close_todos(db, "line", line.id, ("URGENT_PENDING",))
+    elif not ok and line.urgent_resolved:
+        # 补挂的领料单在金蝶被反审核 / 作废：恢复"紧急·待补"；已过 24 小时的，下一次巡检照常进挂账
+        line.urgent_resolved = False

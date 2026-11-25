@@ -175,6 +175,11 @@ def close_period(db: Session, op: User, period: str) -> PeriodClose:
     require_role(op, "FINANCE")
     if period >= period_of(clock.today()):
         raise BizError("只能关已结束的月份")
+    # 业务确认（2026-11-25）：该月及之前还有待 IT 复核的冲销，先复核再关账（关账后该冲销只能驳回，误登就改不了了）
+    pending = [r for r in db.scalars(select(Event).where(Event.etype == "REVERSAL", Event.status == "PENDING"))
+               if period_of(db.get(Event, r.reverses_id).created_at) <= period]
+    if pending:
+        raise BizError(f"{period} 及之前还有 {len(pending)} 笔待复核的冲销，请先由 IT 复核后再关账")
     run(db)
     open_cnt = db.scalar(select(func.count()).select_from(ReconDiff).where(ReconDiff.period <= period,
                                                                          ReconDiff.diff != 0))

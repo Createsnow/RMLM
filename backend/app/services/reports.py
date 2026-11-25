@@ -20,6 +20,10 @@ def _pct(a, b) -> float | None:
     return round(float(a) / float(b) * 100, 1) if b else None
 
 
+def _reversed_ids(db: Session) -> set[int]:
+    return set(db.scalars(select(Event.reverses_id).where(Event.etype == "REVERSAL", Event.status == "EFFECTIVE")))
+
+
 def scoped_lines(db: Session, user: User, include_void: bool = False) -> list[LedgerLine]:
     q = select(LedgerLine)
     if not include_void:
@@ -49,8 +53,11 @@ def dashboard(db: Session, user: User) -> dict:
         if l.urgent and not l.urgent_resolved:
             urgent += 1
     line_ids = [l.id for l in lines]
-    events = list(db.scalars(select(Event).where(Event.line_id.in_(line_ids or [0]), Event.status == "EFFECTIVE",
-                                                Event.etype.notin_(("SIGN", "SPLIT_IN", "REVERSAL")))))
+    reversed_ids = _reversed_ids(db)
+    # 代登率：已被冲销的事件不算（误登已更正）
+    events = [e for e in db.scalars(select(Event).where(Event.line_id.in_(line_ids or [0]), Event.status == "EFFECTIVE",
+                                                        Event.etype.notin_(("SIGN", "SPLIT_IN", "REVERSAL"))))
+              if e.id not in reversed_ids]
     projects = {p.id: p for p in db.scalars(select(Project))}
     roots = [l for l in lines if l.level == 1]
     gate = {
@@ -153,8 +160,7 @@ def observe(db: Session, lines: list[LedgerLine], calcs) -> dict:
     today = clock.today()
     diffs = list(db.scalars(select(ReconDiff)))
     # 被冲销的整件报废不再需要报废单，不算进覆盖率分母
-    reversed_ids = set(db.scalars(select(Event.reverses_id).where(Event.etype == "REVERSAL",
-                                                                  Event.status == "EFFECTIVE")))
+    reversed_ids = _reversed_ids(db)
     scrap_events = [e for e in db.scalars(select(Event).where(Event.etype == "SCRAP", Event.status == "EFFECTIVE",
                                                               Event.scrap_mode == "WHOLE"))
                     if e.id not in reversed_ids]
@@ -302,7 +308,10 @@ def quarterly_lists(db: Session, user: User) -> dict:
                            "location_id": l.location_id})
     qs = date(today.year, 3 * ((today.month - 1) // 3) + 1, 1)
     usage: dict[str, int] = defaultdict(int)
+    reversed_ids = _reversed_ids(db)
     for e in db.scalars(select(Event).where(Event.created_at >= qs, Event.status == "EFFECTIVE")):
+        if e.id in reversed_ids:
+            continue  # 已冲销的误登不算字典使用
         for code in (e.dest, e.loss_reason, e.scrap_reason):
             if code:
                 usage[code] += 1

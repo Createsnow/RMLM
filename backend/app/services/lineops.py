@@ -259,7 +259,8 @@ def consume(db: Session, line: LedgerLine, op: User, qty, dest: str | None, is_l
         if not loc_id:
             raise BizError("去向为 D03 产线试用时必须选择产线工位")
     _require_photos(photos, "耗用")
-    return _event(db, line, "CONSUME", op, proxy, qty=q, dest=dest if not is_loss else (dest or None),
+    # 损耗不走去向字典：去向一律不记（前端本来不传；接口直接调用传了也忽略，免得字典复盘出现非字典值）
+    return _event(db, line, "CONSUME", op, proxy, qty=q, dest=None if is_loss else dest,
                   is_loss=is_loss, loss_reason=loss_reason if is_loss else None, note=note, photos=photos,
                   location_id=loc_id, extra=extra)
 
@@ -549,7 +550,20 @@ def transfer_decide(db: Session, req: Event, op: User, accept: bool) -> Event:
     db.add(e)
     db.flush()
     notify(db, old_holder, f"{op.name} 已确认接收：{line.code}", "line", line.id)
+    _reassign_line_requests(db, line)
     return e
+
+
+def _reassign_line_requests(db: Session, line: LedgerLine) -> None:
+    """转交生效后，该行待审的续期 / 改归还日改由新持有人的直属上级审核（业务确认 2026-11-25）：
+    原审核人的待办关闭，给新审核人派待办。"""
+    approver = _line_approver(db, line)
+    for r in db.scalars(select(Event).where(Event.line_id == line.id, Event.etype.in_(("RENEW", "DUE_CHANGE")),
+                                            Event.status == "PENDING")):
+        close_todos(db, "event", r.id, ("LINE_APPROVE",))
+        what = (f"续期审核：{line.code} 续 {r.extra['months']} 个月" if r.etype == "RENEW"
+                else f"改归还日审核：{line.code} → {r.extra['new_date']}")
+        add_todo(db, approver.id, "LINE_APPROVE", what + "（转交后改派）", "event", r.id, due_hours=24)
 
 
 # ------------------------------------------------------------------ 退库 / 报废
@@ -595,6 +609,8 @@ def quarter_confirm(db: Session, line: LedgerLine, op: User, note: str | None, p
     proxy = _operator(db, line, op)
     if not line.long_cycle:
         raise BizError("只有长周期物料需要季度在用确认")
+    if ledger.load_one(db, line, lock=True).balance <= 0:
+        raise BizError("结存为 0，无需季度在用确认")
     e = _event(db, line, "QCONFIRM", op, proxy, note=note, photos=photos or None,
                extra={"quarter": f"{clock.today().year}-Q{(clock.today().month - 1) // 3 + 1}"})
     close_todos(db, "line", line.id, ("QCONFIRM",))
@@ -609,6 +625,12 @@ def _line_approver(db: Session, line: LedgerLine) -> User:
     return default_approver(db, db.get(User, line.holder_id))
 
 
+def _no_pending(db: Session, line: LedgerLine, etype: str, what: str) -> None:
+    if db.scalar(select(Event.id).where(Event.line_id == line.id, Event.etype == etype, Event.status == "PENDING")
+                 .limit(1)):
+        raise BizError(f"该行已有待审核的{what}申请，请等上级处理后再提")
+
+
 def renew_request(db: Session, line: LedgerLine, op: User, months: int, reason: str) -> Event:
     _guard(db, line)
     proxy = _operator(db, line, op)
@@ -618,6 +640,7 @@ def renew_request(db: Session, line: LedgerLine, op: User, months: int, reason: 
         raise BizError("每次续期 1–12 个月")
     if not (reason or "").strip():
         raise BizError("请填写续期原因")
+    _no_pending(db, line, "RENEW", "续期")
     e = _event(db, line, "RENEW", op, proxy, reason=reason, status="PENDING", extra={"months": int(months)})
     add_todo(db, _line_approver(db, line).id, "LINE_APPROVE", f"续期审核：{line.code} 续 {months} 个月", "event", e.id,
              due_hours=24)
@@ -633,6 +656,7 @@ def due_change_request(db: Session, line: LedgerLine, op: User, new_date: date, 
         raise BizError("超过长周期最长期限，请走续期")
     if not (reason or "").strip():
         raise BizError("请填写原因")
+    _no_pending(db, line, "DUE_CHANGE", "改归还日")
     e = _event(db, line, "DUE_CHANGE", op, proxy, reason=reason, status="PENDING",
                extra={"new_date": new_date.isoformat()})
     add_todo(db, _line_approver(db, line).id, "LINE_APPROVE", f"改归还日审核：{line.code} → {new_date}", "event",
@@ -649,6 +673,8 @@ def line_request_decide(db: Session, req: Event, op: User, approve: bool, note: 
         raise forbid("不能审核自己的申请")
     if op.id != approver.id and op.id not in active_delegates(db, approver.id):
         raise forbid("只有持有人的直属上级（或其代理人）可以审核")
+    if approve and req.etype == "DUE_CHANGE" and date.fromisoformat(req.extra["new_date"]) <= clock.today():
+        raise BizError("申请的新归还日已过，不能再批准，请驳回后由持有人重新申请")
     req.status = "EFFECTIVE" if approve else "REJECTED"
     req.reviewed_by, req.reviewed_at = op.id, clock.now()
     req.note = note
@@ -709,8 +735,9 @@ def reversal_decide(db: Session, rev: Event, op: User, approve: bool, note: str 
     if approve and target.etype == "SPLIT_OUT":
         kids = list(db.scalars(select(LedgerLine).where(LedgerLine.split_event_id == target.id)))
         for k in kids:
+            # 只看生效或待审的事件：已撤回 / 已拒绝的转交、被驳回的申请不算"发生过业务"
             used = db.scalar(select(Event.id).where(Event.line_id == k.id, Event.etype != "SPLIT_IN",
-                                                    Event.status != "REJECTED").limit(1))
+                                                    Event.status.in_(("EFFECTIVE", "PENDING"))).limit(1))
             if used:
                 raise BizError(f"子行 {k.code} 已发生业务，不能冲销该拆分")
         for k in kids:

@@ -9,7 +9,10 @@
       </el-select>
       <el-input v-model="q" placeholder="单据号 / 备注" clearable style="width: 180px" @change="load" />
       <template v-if="hasRole('KEEPER', 'ADMIN')">
-        <el-button v-if="hasRole('KEEPER','ADMIN')" :loading="syncing" @click="syncK3">从金蝶同步领料单</el-button>
+        <el-dropdown split-button :disabled="syncing" @click="syncK3(false)" @command="syncK3(true)">
+          {{ syncing ? '同步中…' : '从金蝶同步领料单' }}
+          <template #dropdown><el-dropdown-menu><el-dropdown-item command="full">全量同步（忽略增量水位，较慢）</el-dropdown-item></el-dropdown-menu></template>
+        </el-dropdown>
         <el-button type="primary" @click="openNew"><el-icon><Plus /></el-icon>录入单据</el-button>
         <el-upload :show-file-list="false" :http-request="doImport" accept=".xlsx"><el-button><el-icon><Upload /></el-icon>Excel 导入</el-button></el-upload>
       </template>
@@ -79,7 +82,7 @@
 
 <script setup>
 import { onMounted, reactive, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
 import { hasRole } from '../store'
 import { DOC_TYPES, today } from '../utils'
@@ -90,10 +93,15 @@ const q = ref('')
 const dlg = ref(false)
 const f = reactive({})
 const syncing = ref(false)
-async function syncK3() {
+async function syncK3(full) {
+  if (full) {
+    try {
+      await ElMessageBox.confirm('全量同步会从金蝶重新拉取全部研发领料单（研发测试、客供领料其他出库单），用于新增单据类型或补漏，耗时较长。继续？', '全量同步', { type: 'warning' })
+    } catch { return }
+  }
   syncing.value = true
   try {
-    const r = await api.post('/api/erp/docs/sync')
+    const r = await api.post(`/api/erp/docs/sync${full ? '?full=true' : ''}`)
     ElMessage[r.errors?.length ? 'warning' : 'success'](`金蝶领料单：取回 ${r.fetched}，新增 ${r.created}，更新 ${r.updated}，自动生成领用行 ${r.auto_bound}${r.errors?.length ? `，跳过 ${r.errors.length} 张（已派待办）` : ''}`)
     load()
   } finally { syncing.value = false }
