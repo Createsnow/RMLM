@@ -11,7 +11,7 @@ from sqlalchemy.schema import CreateColumn
 
 from . import db as dbmod
 from .api import biz, core
-from .config import settings
+from .config import check_jwt_secret, settings
 from .dicts import SEED
 from .models import AuditLog, DictItem, User
 from .security import hash_password
@@ -68,12 +68,13 @@ def init_db() -> None:
                     db.add(DictItem(dict_type=dtype, code=code, name=name, meaning=meaning or None, sort=i))
         if not db.scalar(select(User.id).limit(1)):
             db.add(User(username=settings.admin_username, name="系统管理员", roles="ADMIN,USER",
-                        password_hash=hash_password(settings.admin_password), must_change_pw=True))
+                        password_hash=hash_password(settings.admin_password), must_change_pw=False))
         db.commit()
 
 
 @asynccontextmanager
 async def lifespan(_app):
+    check_jwt_secret(settings.jwt_secret)
     init_db()
     if settings.wecom_enabled:
         from .services.wecom import install_push_hook

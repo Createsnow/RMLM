@@ -30,7 +30,7 @@ cp .env.example .env        # 修改其中的密码和密钥
 docker compose up -d --build
 ```
 
-访问 `http://服务器:8000`，用 `.env` 里的管理员账号登录，首次登录强制改密码。生产环境请在前面加一层 HTTPS 反向代理（手机摄像头扫码、企微网页授权都需要 HTTPS）。
+访问 `http://服务器:8000`，用 `.env` 里的管理员账号登录，登录后请在右上角“修改密码”里改掉初始密码（系统不强制改密码）。生产环境请在前面加一层 HTTPS 反向代理（手机摄像头扫码、企微网页授权都需要 HTTPS）。
 
 **网络要求**：服务器要同时满足两头——能访问金蝶内网地址（读物料），又能通过企业已备案的 HTTPS 域名被企微访问（`RMLM_PUBLIC_URL`，需在企微后台设为可信域名）。常见做法是应用部署在内网，由 DMZ 反向代理对外。
 
@@ -89,10 +89,12 @@ RMLM_DATABASE_URL="mysql+pymysql://rmlm:密码@127.0.0.1:3306/rmlm_test?charset=
 |---|---|---|
 | `DB_HOST` / `DB_PORT` / `DB_NAME` / `DB_USER` / `DB_PASSWORD` | MySQL 连接（分项填写，密码可含特殊字符） | 127.0.0.1 / 3306 / rmlm / rmlm / rmlm_dev |
 | `RMLM_DATABASE_URL` | 完整 MySQL 连接串；设置后优先于上面的 `DB_*` | 空 |
-| `RMLM_JWT_SECRET` | 登录令牌签名密钥 | 开发用值，生产必须修改 |
+| `RMLM_JWT_SECRET` | 登录令牌签名密钥：至少 16 位随机字符；为空、仍是示例值或过短时**拒绝启动**（本地 `start.py` 会自动生成） | 无 |
 | `RMLM_JWT_HOURS` | 登录有效期（小时） | 12 |
+| `RMLM_OVER_ISSUE_PCT` | 开单数量允许超出申请数量的比例（%），0 = 不允许超出 | 0 |
 | `RMLM_PHOTO_DIR` | 照片目录（永久保存） | `./data/photos` |
 | `RMLM_PHOTO_MAX_KB` | 照片压缩目标大小 | 300 |
+| `RMLM_WATERMARK_FONT` | 照片水印的中文字体文件 | 空：依次找 Linux 文泉驿、Windows 微软雅黑 / 黑体、Mac 苹方 / 黑体 |
 | `RMLM_SCHEDULER` | 是否启动定时任务（1/0） | 1 |
 | `RMLM_ADMIN_USER` / `RMLM_ADMIN_PASSWORD` | 首次启动时创建的管理员 | admin / admin123 |
 | `RMLM_PUBLIC_URL` | 对外访问地址（企微消息链接、网页授权回调） | 空 |

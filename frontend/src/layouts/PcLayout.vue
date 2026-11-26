@@ -19,12 +19,12 @@
         <div class="grow" />
         <el-tag v-if="store.user?.frozen" type="danger" effect="dark">新领用已冻结</el-tag>
         <span class="who">{{ store.user?.name }} <span class="muted">{{ (store.user?.role_names || []).join(' / ') }}</span></span>
+        <el-button text @click="$router.push('/password')"><el-icon><Lock /></el-icon>修改密码</el-button>
         <el-button text @click="toMobile"><el-icon><Iphone /></el-icon>手机版</el-button>
         <el-dropdown>
           <el-button text><el-icon><Setting /></el-icon></el-button>
           <template #dropdown>
             <el-dropdown-menu>
-              <el-dropdown-item @click="$router.push('/password')">修改密码</el-dropdown-item>
               <el-dropdown-item @click="$router.push('/delegates')">代理审核设置</el-dropdown-item>
               <el-dropdown-item divided @click="logout">退出登录</el-dropdown-item>
             </el-dropdown-menu>
@@ -39,7 +39,6 @@
 <script setup>
 import { computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessageBox } from 'element-plus'
 import { api } from '../api'
 import { store, hasRole, setUser, logout } from '../store'
 import { loadDicts } from '../utils'
@@ -87,9 +86,6 @@ async function refresh() {
     const me = await api.get('/api/auth/me', { silent: true })
     setUser(me)
     store.counts = await api.get('/api/todos/count', { silent: true })
-    if (me.must_change_pw && route.path !== '/password') {
-      ElMessageBox.alert('首次登录或密码已被重置，请先修改密码。', '提示').then(() => router.push('/password'))
-    }
   } catch { /* 401 已跳登录 */ }
 }
 function toMobile() { sessionStorage.removeItem('rmlm_pc'); router.push('/m') }

@@ -67,7 +67,7 @@ async function finishWeCom(code, state) {
   wxBusy.value = true
   const expect = session('rmlm_wx_state')
   session('rmlm_wx_state', null)
-  if (expect && expect !== state) {
+  if (!expect || expect !== state) {  // 不是本页发起的授权（缺少或对不上校验码）一律拒绝，防止被诱导登录别人的账号
     wxBusy.value = false
     wxError.value = '登录校验失败，请重新进入'
     return

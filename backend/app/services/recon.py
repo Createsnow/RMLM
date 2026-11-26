@@ -1,4 +1,5 @@
 """对账与关账：单据号 + 行号 + 数量 三字段逐单核对；差额必须为 0 才能关账。"""
+import re
 from collections import defaultdict
 from datetime import date, datetime, timedelta
 from decimal import Decimal
@@ -173,6 +174,8 @@ def resolve(db: Session, op: User, d: ReconDiff, reason_code: str, method: str, 
 
 def close_period(db: Session, op: User, period: str) -> PeriodClose:
     require_role(op, "FINANCE")
+    if not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", period or ""):
+        raise BizError("关账月份格式应为 YYYY-MM，如 2026-11")
     if period >= period_of(clock.today()):
         raise BizError("只能关已结束的月份")
     # 业务确认（2026-11-25）：该月及之前还有待 IT 复核的冲销，先复核再关账（关账后该冲销只能驳回，误登就改不了了）
