@@ -91,7 +91,6 @@ RMLM_DATABASE_URL="mysql+pymysql://rmlm:密码@127.0.0.1:3306/rmlm_test?charset=
 | `RMLM_DATABASE_URL` | 完整 MySQL 连接串；设置后优先于上面的 `DB_*` | 空 |
 | `RMLM_JWT_SECRET` | 登录令牌签名密钥：至少 16 位随机字符；为空、仍是示例值或过短时**拒绝启动**（本地 `start.py` 会自动生成） | 无 |
 | `RMLM_JWT_HOURS` | 登录有效期（小时） | 12 |
-| `RMLM_LOGIN_MAX_FAILS` / `RMLM_LOGIN_LOCK_MINUTES` | 密码连续输错多少次锁定账号、锁定多少分钟（管理员重置密码可提前解锁） | 5 / 15 |
 | `RMLM_OVER_ISSUE_PCT` | 开单数量允许超出申请数量的比例（%），0 = 不允许超出 | 0 |
 | `RMLM_PHOTO_DIR` | 照片目录（永久保存） | `./data/photos` |
 | `RMLM_PHOTO_MAX_KB` | 照片压缩目标大小 | 300 |

@@ -41,22 +41,11 @@ def test_initial_or_reset_password_not_forced_to_change(org, ref):
     assert org.c.get("/api/lines", headers=_h(tok)).status_code == 401
 
 
-# ------------------------------------------------------------------ 7 连续输错 5 次锁定 15 分钟
-def test_login_locks_after_five_failures(org):
-    for _ in range(5):
-        assert _login(org, "a1", "wrong").status_code == 401
-    r = _login(org, "a1", PW)
-    assert r.status_code == 401 and "锁定" in r.json()["detail"]
-    clock.set_now(clock.now() + timedelta(minutes=16))
-    assert _login(org, "a1", PW).status_code == 200
-
-
-def test_successful_login_resets_failure_count(org):
-    for _ in range(4):
-        _login(org, "a1", "wrong")
-    assert _login(org, "a1", PW).status_code == 200
-    for _ in range(4):
-        _login(org, "a1", "wrong")
+# ------------------------------------------------------------------ 7 不做输错锁定（2026-11-26 业务确认取消）
+def test_no_lockout_after_repeated_failures(org):
+    for _ in range(10):
+        r = _login(org, "a1", "wrong")
+        assert r.status_code == 401 and "锁定" not in r.json()["detail"]
     assert _login(org, "a1", PW).status_code == 200
 
 

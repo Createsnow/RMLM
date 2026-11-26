@@ -53,9 +53,6 @@ class Settings:
         # ---------- 安全与登录
         self.jwt_secret: str = _env("RMLM_JWT_SECRET")  # 启动时由 check_jwt_secret 校验
         self.jwt_hours: int = _int("RMLM_JWT_HOURS", 12)
-        # 密码登录连续输错多少次锁定、锁定多少分钟
-        self.login_max_fails: int = _int("RMLM_LOGIN_MAX_FAILS", 5)
-        self.login_lock_minutes: int = _int("RMLM_LOGIN_LOCK_MINUTES", 15)
         # 开单数量允许超出申请数量的比例（%）：0 = 不允许超出（默认）；如光缆裁长常略多于申请，可设 5 / 10
         self.over_issue_pct: int = _int("RMLM_OVER_ISSUE_PCT", 0)
 

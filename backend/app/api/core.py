@@ -1,5 +1,5 @@
 """登录、账号与组织、代理、主数据、字典、待办、照片、审计、定时任务手动触发。"""
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, File, Request, UploadFile
 from fastapi.responses import FileResponse
@@ -35,19 +35,10 @@ class LoginIn(BaseModel):
 
 @router.post("/auth/login")
 def login(body: LoginIn, db: Session = Depends(get_db)):
+    # 业务确认（2026-11-26）：不做输错锁定
     u = db.scalar(select(User).where(User.username == body.username.strip()))
-    now = clock.now()
-    if u is not None and u.locked_until and u.locked_until > now:
-        mins = max(1, int((u.locked_until - now).total_seconds() // 60) + 1)
-        raise BizError(f"密码连续输错次数过多，账号已锁定，请 {mins} 分钟后再试或联系管理员", 401)
     if not u or not u.active or not verify_password(body.password, u.password_hash):
-        if u is not None:
-            u.failed_logins = (u.failed_logins or 0) + 1
-            if u.failed_logins >= settings.login_max_fails:
-                u.failed_logins, u.locked_until = 0, now + timedelta(minutes=settings.login_lock_minutes)
-            db.commit()  # 抛错会回滚，计数必须先提交
         raise BizError("账号或密码错误", 401)
-    u.failed_logins, u.locked_until = 0, None
     return {"token": make_token(u, "pw"), "user": user_out(u, db)}
 
 
@@ -178,7 +169,6 @@ def update_user(uid: int, body: UserIn, user: User = Depends(current_user), db: 
     if body.password:
         u.password_hash, u.must_change_pw = hash_password(body.password), False  # 不强制改密码，本人可随时在“修改密码”里改
         u.token_version = (u.token_version or 0) + 1  # 重置密码：此前发出的登录凭证全部失效
-        u.failed_logins, u.locked_until = 0, None  # 顺带解除锁定
     if not body.active and u.active:
         _check_clearance(db, u)
     u.active = body.active
