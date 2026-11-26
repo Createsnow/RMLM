@@ -45,17 +45,19 @@
           <span v-else class="muted">{{ row.note || '' }}</span>
         </template></el-table-column>
         <el-table-column label="操作" width="150"><template #default="{ row }">
-          <template v-if="row.state !== 'RESOLVED' && hasRole('KEEPER','FINANCE')">
+          <template v-if="row.state !== 'RESOLVED'">
             <el-button v-if="!row.claimed_at && hasRole('KEEPER')" size="small" @click="claim(row)">认领</el-button>
-            <el-button size="small" type="primary" @click="openResolve(row)">消差</el-button>
+            <el-button v-if="row.claimed_at && hasRole('FINANCE','ADMIN') && row.owner_id !== store.user?.id" size="small" type="primary" @click="openResolve(row)">关闭差异</el-button>
+            <span v-else-if="row.claimed_at" class="muted">待财务 / IT 关闭</span>
+            <span v-else-if="!hasRole('KEEPER')" class="muted">待领料专员认领</span>
           </template>
-          <el-tag v-else-if="row.state === 'RESOLVED'" type="success" size="small">已平</el-tag>
+          <el-tag v-else type="success" size="small">已平</el-tag>
         </template></el-table-column>
       </el-table>
     </div>
-    <el-dialog v-model="dlg" title="消除差异" width="520px">
+    <el-dialog v-model="dlg" title="关闭差异" width="520px">
       <el-alert type="info" :closable="false" style="margin-bottom: 10px"
-        title="中台侧差错：先在明细上发起冲销（IT 复核生效），填冲销事件号；ERP 侧差错：开金蝶调整单并经财务审核，填调整单号；漏登用补登，分摊不平用重新分摊。提交后系统重算，差额为 0 才能关闭。" />
+        title="由财务 / IT 关闭领料专员已认领的差异（认领人不能关闭自己认领的）。中台侧差错：领料专员先在明细上发起冲销（IT 复核生效），填冲销事件号；ERP 侧差错：开金蝶调整单并经财务审核，填调整单号；漏登用补登，分摊不平用重新分摊。提交后系统重算，差额为 0 才能关闭。" />
       <el-form label-width="90px">
         <el-form-item label="原因码" required>
           <el-select v-model="rf.reason_code" style="width: 100%"><el-option v-for="d in dictOptions('RECON_REASON')" :key="d.code" :value="d.code" :label="`${d.code} ${d.name}`" /></el-select>
@@ -77,7 +79,7 @@
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
-import { hasRole } from '../store'
+import { hasRole, store } from '../store'
 import { dictName, dictOptions } from '../utils'
 
 const METHODS = { REVERSAL: '冲销', ADJUST: '调整单', BIND: '补登', ALLOC: '重新分摊' }

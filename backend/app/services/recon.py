@@ -142,11 +142,21 @@ def claim(db: Session, op: User, d: ReconDiff) -> ReconDiff:
         raise BizError("该差异已平")
     d.owner_id, d.claimed_at, d.state = op.id, clock.now(), "CLAIMED"
     close_todos(db, "diff", d.id, ("RECON_CLAIM",))
+    # 蓝图表 3-7：领料专员认领、处理；关闭差异由财务 + IT 完成（认领人与关闭人不同）
+    title = f"对账差异待关闭：{KIND_NAMES.get(d.kind, d.kind)} {d.erp_doc_no or d.key}（认领人 {op.name}）"
+    closers = {u.id for role in ("FINANCE", "ADMIN") for u in users_with_role(db, role)} - {op.id}
+    for uid in sorted(closers):
+        add_todo(db, uid, "RECON_RESOLVE", title, "diff", d.id, dedupe=True)
     return d
 
 
 def resolve(db: Session, op: User, d: ReconDiff, reason_code: str, method: str, ref: str | None, note: str | None) -> ReconDiff:
-    require_role(op, "KEEPER", "FINANCE")
+    # 蓝图表 3-7 第⑤步：关闭差异由财务 + IT 完成；领料专员只负责第④步认领
+    require_role(op, "FINANCE", "ADMIN")
+    if not d.claimed_at:
+        raise BizError("该差异还没有领料专员认领，请先认领处理后再关闭")
+    if d.owner_id == op.id:
+        raise BizError("认领人不能关闭自己认领的差异，请由其他财务或 IT 关闭")
     if reason_code not in dict_codes(db, "RECON_REASON"):
         raise BizError("请选择差异原因码（不允许「其他」）")
     if method not in ("REVERSAL", "ADJUST", "BIND", "ALLOC"):
@@ -162,8 +172,6 @@ def resolve(db: Session, op: User, d: ReconDiff, reason_code: str, method: str, 
         if not ev or ev.etype != "REVERSAL" or ev.status != "EFFECTIVE":
             raise BizError("中台侧差错须引用已复核生效的冲销事件编号")
     d.reason_code, d.method, d.method_ref, d.note = reason_code, method, ref, note
-    if not d.claimed_at:
-        d.owner_id, d.claimed_at = op.id, clock.now()
     run(db)
     db.refresh(d)
     if d.diff != 0:

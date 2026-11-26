@@ -698,7 +698,7 @@ def diffs(period: str = "", state: str = "", user: User = Depends(current_user),
              "erp_doc_no": d.erp_doc_no, "erp_line_no": d.erp_line_no, "line_id": d.line_id, "event_id": d.event_id,
              "material": (mats[d.material_id].name if d.material_id in mats else None),
              "erp_qty": s(d.erp_qty), "detail_qty": s(d.detail_qty), "diff": s(d.diff), "owner": names.get(d.owner_id),
-             "claimed_at": s(d.claimed_at), "reason_code": d.reason_code, "method": d.method, "method_ref": d.method_ref,
+             "owner_id": d.owner_id, "claimed_at": s(d.claimed_at), "reason_code": d.reason_code, "method": d.method, "method_ref": d.method_ref,
              "note": d.note, "state": d.state, "escalation": d.escalation, "created_at": s(d.created_at),
              "resolved_at": s(d.resolved_at)} for d in db.scalars(stmt)]
 
