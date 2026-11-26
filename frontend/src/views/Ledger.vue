@@ -44,10 +44,11 @@
 </template>
 
 <script setup>
-import { onMounted, ref } from 'vue'
+import { ref } from 'vue'
 import { api } from '../api'
 import { STATUS_TYPE, fmtMoney } from '../utils'
 import BalanceBar from '../components/BalanceBar.vue'
+import { useRefresh } from '../useRefresh'
 
 const rows = ref([])
 const q = ref('')
@@ -56,5 +57,5 @@ const status = ref('active')
 async function load() {
   rows.value = await api.get(`/api/lines?scope=${scope.value}&status=${status.value}&q=${encodeURIComponent(q.value)}`)
 }
-onMounted(load)
+useRefresh(load)
 </script>

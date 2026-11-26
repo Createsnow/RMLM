@@ -26,11 +26,12 @@
 </template>
 
 <script setup>
-import { onMounted, reactive, ref } from 'vue'
+import { reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { api } from '../api'
 import { store } from '../store'
 import RemoteSelect from '../components/RemoteSelect.vue'
+import { useRefresh } from '../useRefresh'
 
 const rows = ref([])
 const f = reactive({ agent_id: null })
@@ -41,5 +42,5 @@ async function add() {
   ElMessage.success('已设置'); load()
 }
 async function end(row) { await api.del(`/api/delegates/${row.id}`); load() }
-onMounted(load)
+useRefresh(load)
 </script>

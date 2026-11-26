@@ -74,9 +74,10 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, ref } from 'vue'
 import { api } from '../api'
 import { STATUS_TYPE, fmtMoney, dictName } from '../utils'
+import { useRefresh } from '../useRefresh'
 
 const d = ref(null)
 const EV_TYPE = { SCRAP: 'danger', RETURN: 'success', TRANSFER_OK: '', TRANSFER_REQ: '', HOLD: 'info', MOVE: 'info', SIGN: 'primary', CONCLUSION: 'success' }
@@ -95,5 +96,5 @@ const metricRows = computed(() => {
     row('超期挂账清理率', false, '首季 ≥ 80%', o.overdue_clear_rate, o.overdue_clear_rate >= 80, '本季清理行数 / 季初挂账行数')
   ]
 })
-onMounted(async () => { d.value = await api.get('/api/reports/dashboard') })
+useRefresh(async () => { d.value = await api.get('/api/reports/dashboard') })
 </script>

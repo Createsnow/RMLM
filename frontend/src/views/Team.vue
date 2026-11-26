@@ -17,10 +17,11 @@
 </template>
 
 <script setup>
-import { onMounted, ref } from 'vue'
+import { ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
 import { store } from '../store'
+import { useRefresh } from '../useRefresh'
 
 const rows = ref([])
 const nameOf = id => id === store.user.id ? store.user.name : (rows.value.find(r => r.id === id)?.name || '')
@@ -33,5 +34,5 @@ async function clearance(u) {
   const r = await api.get(`/api/users/${u.id}/clearance`)
   ElMessageBox.alert(r.clear ? '名下无结存' : r.lines.map(l => `${l.code}：${l.balance}`).join('<br>'), `${u.name} 名下结存`, { dangerouslyUseHTMLString: true })
 }
-onMounted(load)
+useRefresh(load)
 </script>

@@ -46,11 +46,12 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
 import { REQ_STATUS, dictName } from '../utils'
+import { useRefresh } from '../useRefresh'
 
 const route = useRoute()
 const mobile = computed(() => route.path.startsWith('/m'))
@@ -67,5 +68,5 @@ async function cancel() {
   await api.post(`/api/requisitions/${r.value.id}/cancel`)
   load()
 }
-onMounted(load)
+useRefresh(load)
 </script>

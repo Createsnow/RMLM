@@ -103,7 +103,6 @@ import { Iphone, Lock, Switch, SwitchButton } from '@element-plus/icons-vue'
 import { api } from '../api'
 import { store, hasRole, setUser, logout } from '../store'
 import { loadDicts } from '../utils'
-import { HOME } from '../tabList'
 import { tabs, findTab, visitTab, restoreTabs, resetTabs, tabKeyOf } from '../tabs'
 import TabBar from './TabBar.vue'
 
@@ -180,6 +179,8 @@ watch(() => route.fullPath, () => {
   // 离开电脑版框架（打印标签、手机版、登录页）时不记页签
   if (route.matched[0]?.path === '/') visitTab({ key: tabKeyOf(route), fullPath: route.fullPath })
 }, { immediate: true })
+// 切换页面时顺带更新待办数（侧栏、铃铛上的数字）
+watch(() => route.path, () => refreshCounts())
 
 /** 菜单：已打开的功能切回上次的地址（保留页面内的参数和内容），未打开的新开页签 */
 function onMenu(path) {
@@ -203,12 +204,11 @@ function pageOf(vnode, key) {
   }
   return w
 }
-/** 首页、我的待办不缓存：每次切回都重新加载，数字和待办是最新的 */
-const NO_CACHE = [HOME, '/todos']
+/** 各页面切回时自行重新取数（见 useRefresh），页面实例本身都缓存，保留筛选条件和填了一半的内容 */
 const cached = ref([])
 watch([() => tabs.list.map(x => pageName(x.key)).join('|'), () => route.path], () => {
   const names = tabs.list.map(x => pageName(x.key))
-  cached.value = tabs.list.filter(x => !NO_CACHE.includes(x.key)).map(x => pageName(x.key))
+  cached.value = names
   for (const name of wrappers.keys()) if (!names.includes(name)) wrappers.delete(name)
 }, { immediate: true, flush: 'post' })
 
@@ -223,6 +223,9 @@ function onCommand(cmd) {
 }
 
 let timer
+async function refreshCounts() {
+  try { store.counts = await api.get('/api/todos/count', { silent: true }) } catch { /* 401 已跳登录 */ }
+}
 async function refresh() {
   try {
     const me = await api.get('/api/auth/me', { silent: true })

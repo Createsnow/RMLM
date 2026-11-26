@@ -74,11 +74,12 @@
 </template>
 
 <script setup>
-import { onMounted, ref } from 'vue'
+import { ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { api } from '../api'
 import { hasRole } from '../store'
 import { dictName, dictOptions } from '../utils'
+import { useRefresh } from '../useRefresh'
 
 const SRC = { SHEET: '原表', ERP: '按出库单回填', VIRTUAL: '未立项' }
 const tab = ref('rows')
@@ -105,7 +106,7 @@ async function upload({ file }) {
   batch.value = last.value.batch
   load()
 }
-onMounted(async () => {
+useRefresh(load, async () => {
   const r = await api.get('/api/history/rules')
   rules.value = r.rules; columns.value = r.columns; virtualProject.value = r.virtual_project
   load()

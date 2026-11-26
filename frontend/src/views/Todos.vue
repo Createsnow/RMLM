@@ -28,12 +28,13 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { api } from '../api'
 import { store } from '../store'
 import { TODO_KINDS, todoLink } from '../utils'
+import { useRefresh } from '../useRefresh'
 
 const route = useRoute()
 const router = useRouter()
@@ -57,7 +58,7 @@ async function decideTransfer(accept) {
   ElMessage.success(accept ? '已接收' : '已拒绝')
   router.replace(`${mobile.value ? '/m' : ''}/line/${line.id}`)
 }
-onMounted(load)
+useRefresh(load)
 </script>
 
 <style scoped>

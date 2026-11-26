@@ -60,9 +60,10 @@
 </template>
 
 <script setup>
-import { onMounted, reactive, ref } from 'vue'
+import { reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
+import { useRefresh } from '../useRefresh'
 
 const rows = ref([])
 const all = ref([])
@@ -100,7 +101,7 @@ async function syncContacts() {
     load()
   } finally { syncing.value = false }
 }
-onMounted(async () => {
+useRefresh(load, async () => {
   roles.value = await api.get('/api/roles')
   wx.value = await api.get('/api/admin/wecom/status')
   load()

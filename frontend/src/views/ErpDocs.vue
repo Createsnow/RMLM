@@ -106,11 +106,12 @@
 </template>
 
 <script setup>
-import { onMounted, reactive, ref } from 'vue'
+import { reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
 import { hasRole } from '../store'
 import { DOC_TYPES, today } from '../utils'
+import { useRefresh } from '../useRefresh'
 
 const rows = ref([])
 const type = ref('')
@@ -161,7 +162,7 @@ async function doImport({ file }) { const r = await api.upload('/api/erp/docs/im
 async function togglePosted(row) { await api.post(`/api/erp/docs/${row.id}/posted?posted=${!row.posted}`); load() }
 async function finApprove(row) { await api.post(`/api/erp/docs/${row.id}/finance-approve`); ElMessage.success('已审核'); load() }
 async function receive(row) { await api.post(`/api/erp/docs/${row.id}/receive`); ElMessage.success('已确认'); load() }
-onMounted(() => { load(); loadSync() })
+useRefresh(() => { load(); loadSync() })
 </script>
 
 <style scoped>

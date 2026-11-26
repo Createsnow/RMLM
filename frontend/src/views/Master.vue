@@ -59,10 +59,11 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { api } from '../api'
 import { hasRole } from '../store'
+import { useRefresh } from '../useRefresh'
 
 const KINDS = { STOCK: '库位', STATION: '工位', SCRAP_BOX: '报废箱' }
 const tab = ref('project')
@@ -96,5 +97,5 @@ function openNew() { Object.keys(f).forEach(k => delete f[k]); Object.assign(f, 
 function edit(row) { Object.keys(f).forEach(k => delete f[k]); Object.assign(f, row, { unit_price: row.unit_price != null ? +row.unit_price : null, active: true }); dlg.value = true }
 async function save() { await api.post(URL[tab.value], f); ElMessage.success('已保存'); dlg.value = false; load() }
 async function doImport({ file }) { const r = await api.upload(`/api/master/import/${tab.value}`, file); ElMessage.success(`已导入 ${r.count} 条`); load() }
-onMounted(load)
+useRefresh(load)
 </script>

@@ -76,11 +76,12 @@
 </template>
 
 <script setup>
-import { onMounted, reactive, ref } from 'vue'
+import { reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
 import { hasRole, store } from '../store'
 import { dictName, dictOptions } from '../utils'
+import { useRefresh } from '../useRefresh'
 
 const METHODS = { REVERSAL: '冲销', ADJUST: '调整单', BIND: '补登', ALLOC: '重新分摊' }
 const periods = ref([])
@@ -100,5 +101,5 @@ async function claim(row) { await api.post(`/api/recon/diffs/${row.id}/claim`); 
 function openResolve(row) { cur.value = row; Object.assign(rf, { reason_code: '', method: 'BIND', ref: '', note: '' }); dlg.value = true }
 async function resolve() { await api.post(`/api/recon/diffs/${cur.value.id}/resolve`, rf); ElMessage.success('已平'); dlg.value = false; load() }
 async function close(p) { await ElMessageBox.confirm(`确认关闭 ${p}？关账后该月不能再录单、不能冲销。`); await api.post(`/api/recon/close/${p}`); ElMessage.success('已关账'); load() }
-onMounted(load)
+useRefresh(load)
 </script>

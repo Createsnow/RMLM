@@ -27,14 +27,15 @@
 </template>
 
 <script setup>
-import { onMounted, ref } from 'vue'
+import { ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { api } from '../api'
 import { hasRole } from '../store'
+import { useRefresh } from '../useRefresh'
 
 const rows = ref([])
 const status = ref('PENDING')
 async function load() { rows.value = await api.get(`/api/reversals?status=${status.value}`) }
 async function decide(row, approve) { await api.post(`/api/reversals/${row.id}/decide`, { approve }); ElMessage.success('已处理'); load() }
-onMounted(load)
+useRefresh(load)
 </script>

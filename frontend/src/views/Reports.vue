@@ -120,11 +120,12 @@
 </template>
 
 <script setup>
-import { onMounted, ref } from 'vue'
+import { ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
 import { hasRole } from '../store'
 import { fmtMoney } from '../utils'
+import { useRefresh } from '../useRefresh'
 
 const W = { overdue: '超期未结案', urgent: '紧急领用超 24 小时未补', hold_30d: '暂存超 30 天', doc_pending: '待单据处置', lab_pending: 'D02 实验结论超 30 天未回填', level3: '三级挂账（提交月度经营会）' }
 const tab = ref('weekly')
@@ -167,5 +168,5 @@ async function load() {
   if (tab.value === 'quarterly') quarterly.value = await api.get('/api/reports/quarterly')
   if (tab.value === 'parallel') await loadPar()
 }
-onMounted(load)
+useRefresh(load)
 </script>

@@ -58,10 +58,11 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
 import RemoteSelect from '../components/RemoteSelect.vue'
+import { useRefresh } from '../useRefresh'
 
 const reqs = ref([])
 const ext = ref([])
@@ -100,5 +101,5 @@ async function handover(row) {
   ElMessage.success(`已交接 ${l.code}，请使用人签收`)
   load()
 }
-onMounted(load)
+useRefresh(load)
 </script>

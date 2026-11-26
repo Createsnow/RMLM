@@ -31,13 +31,14 @@
 </template>
 
 <script setup>
-import { onMounted, ref } from 'vue'
+import { ref } from 'vue'
 import { api } from '../api'
 import { REQ_STATUS, dictName } from '../utils'
+import { useRefresh } from '../useRefresh'
 
 const scope = ref('mine')
 const q = ref('')
 const rows = ref([])
 async function load() { rows.value = await api.get(`/api/requisitions?scope=${scope.value}&q=${encodeURIComponent(q.value)}`) }
-onMounted(load)
+useRefresh(load)
 </script>

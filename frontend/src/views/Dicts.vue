@@ -55,11 +55,12 @@
 </template>
 
 <script setup>
-import { onMounted, reactive, ref } from 'vue'
+import { reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { api } from '../api'
 import { hasRole, store } from '../store'
 import { dictName, loadDicts } from '../utils'
+import { useRefresh } from '../useRefresh'
 
 const NAMES = { DEST: '去向 DICT_DEST', LINE_STATUS: '行状态 DICT_STATUS', CODE_STATUS: '物料码状态', REASON: '领料原因', LOSS_REASON: '损耗原因',
   SCRAP_REASON: '报废原因', RECON_REASON: '差异原因码', DOC_TYPE: 'ERP 单据类型' }
@@ -74,5 +75,5 @@ async function load() {
 }
 async function submit() { await api.post('/api/dict-changes', f); ElMessage.success('已提交'); dlg.value = false; load() }
 async function decide(row, approve) { await api.post(`/api/dict-changes/${row.id}/decide?approve=${approve}`); load() }
-onMounted(load)
+useRefresh(load)
 </script>

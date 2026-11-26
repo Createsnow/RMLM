@@ -37,8 +37,9 @@
 </template>
 
 <script setup>
+import { useRefresh } from '../useRefresh'
 defineProps({ embedded: Boolean })
-import { computed, onMounted, ref } from 'vue'
+import { computed, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { api } from '../api'
 import { hasRole } from '../store'
@@ -70,5 +71,5 @@ async function allocate() {
   result.value = await api.post('/api/returns/allocate', { erp_doc_id: docId.value, event_ids: sel.value.map(r => r.event_id) })
   load()
 }
-onMounted(load)
+useRefresh(load)
 </script>

@@ -45,8 +45,9 @@
 </template>
 
 <script setup>
+import { useRefresh } from '../useRefresh'
 defineProps({ embedded: Boolean })
-import { onMounted, reactive, ref } from 'vue'
+import { reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { api } from '../api'
 import { hasRole } from '../store'
@@ -80,5 +81,5 @@ async function bind(row) {
   else ElMessage[r.leftover.length ? 'warning' : 'success'](r.leftover.length ? '已核销，有未摊完数量进入差异池' : '已核销')
   load()
 }
-onMounted(load)
+useRefresh(load)
 </script>

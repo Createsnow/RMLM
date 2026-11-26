@@ -37,11 +37,12 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
 import { dictName } from '../utils'
+import { useRefresh } from '../useRefresh'
 
 const route = useRoute()
 const mobile = computed(() => route.path.startsWith('/m'))
@@ -64,7 +65,7 @@ async function decideLine(e, approve) {
   ElMessage.success('已处理')
   load()
 }
-onMounted(load)
+useRefresh(load)
 </script>
 
 <style scoped>
