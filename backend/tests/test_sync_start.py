@@ -1,5 +1,5 @@
 """金蝶领料单首次同步起始日期：首次 / 全量只拉起始日期之后的单据，之后按水位增量（.env K3_SYNC_START_DATE / MONTHS）。"""
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 import pytest
 
@@ -57,3 +57,56 @@ def test_bad_start_date_reports_clear_error(org, monkeypatch):
     monkeypatch.setattr(settings, "k3_sync_start_date", "2026/06/01")
     with pytest.raises(BizError, match="K3_SYNC_START_DATE"):
         _sync(Reader())
+
+
+# ------------------------------------------------------------------ 网页设置自动同步开关与间隔
+@pytest.fixture
+def k3_on(monkeypatch):
+    for k in ("k3_server_url", "k3_acct_id", "k3_username", "k3_app_id", "k3_app_secret"):
+        monkeypatch.setattr(settings, k, "x")
+
+
+def _tick(reader, monkeypatch):
+    monkeypatch.setattr(doc_sync, "make_reader", lambda: reader)
+    with dbmod.SessionLocal() as db:
+        out = doc_sync.quarter_sync(db)
+        db.commit()
+    return out
+
+
+def test_default_auto_every_15_minutes(org, k3_on, monkeypatch):
+    r = Reader()
+    _tick(r, monkeypatch)  # 从没同步过：立即同步
+    clock.advance(timedelta(minutes=14, seconds=30))  # 巡检抖动：差几十秒也算到点
+    _tick(r, monkeypatch)
+    assert len(r.calls) == 2
+    clock.advance(timedelta(minutes=5))
+    assert "skipped" in _tick(r, monkeypatch) and len(r.calls) == 2
+
+
+def test_web_interval_and_switch(org, k3_on, monkeypatch):
+    assert org.c.put("/api/erp/docs/sync/settings", headers=org._h("keeper"),
+                     json={"enabled": True, "interval": 60}).status_code == 403
+    bad = org.c.put("/api/erp/docs/sync/settings", headers=org._h("admin"), json={"enabled": True, "interval": 20})
+    assert bad.status_code == 400
+    st = org.ok(org.c.put("/api/erp/docs/sync/settings", headers=org._h("admin"), json={"enabled": True, "interval": 60}))
+    assert st["auto"]["enabled"] is True and st["auto"]["interval"] == 60
+
+    r = Reader()
+    _tick(r, monkeypatch)
+    for _ in range(3):  # 15 / 30 / 45 分钟：不满 1 小时不拉
+        clock.advance(timedelta(minutes=15))
+        _tick(r, monkeypatch)
+    assert len(r.calls) == 1
+    clock.advance(timedelta(minutes=15))
+    _tick(r, monkeypatch)
+    assert len(r.calls) == 2
+    st = org.ok(org.get("keeper", "/api/erp/docs/sync/status"))
+    assert st["auto"]["next_run_at"] == (clock.now() + timedelta(hours=1)).isoformat(sep=" ", timespec="minutes")
+
+    # 关闭后定时不再拉，手动同步照常
+    org.ok(org.c.put("/api/erp/docs/sync/settings", headers=org._h("admin"), json={"enabled": False, "interval": 60}))
+    clock.advance(timedelta(days=1))
+    _tick(r, monkeypatch)
+    assert len(r.calls) == 2
+    assert org.ok(org.get("keeper", "/api/erp/docs/sync/status"))["auto"]["next_run_at"] is None

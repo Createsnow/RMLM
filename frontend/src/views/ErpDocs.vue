@@ -17,6 +17,17 @@
         <el-upload :show-file-list="false" :http-request="doImport" accept=".xlsx"><el-button><el-icon><Upload /></el-icon>Excel 导入</el-button></el-upload>
       </template>
     </div>
+    <div v-if="sync.configured && hasRole('KEEPER', 'ADMIN')" class="card sync-bar">
+      <span>金蝶自动同步：</span>
+      <el-tag v-if="!sync.scheduler" type="danger" size="small">定时任务未启动（.env RMLM_SCHEDULER=0）</el-tag>
+      <el-tag v-else-if="sync.auto?.enabled" type="success" size="small">每 {{ intervalText(sync.auto.interval) }}</el-tag>
+      <el-tag v-else type="info" size="small">已关闭</el-tag>
+      <span class="muted">最近同步 {{ sync.last_run_at || '尚未同步' }}</span>
+      <span v-if="sync.scheduler && sync.auto?.next_run_at" class="muted">下次约 {{ sync.auto.next_run_at }} 后</span>
+      <span v-if="!sync.last_run_at && sync.start_date" class="muted">首次同步从 {{ sync.start_date }} 起</span>
+      <span class="grow" />
+      <el-button v-if="hasRole('ADMIN')" size="small" @click="openAuto">自动同步设置</el-button>
+    </div>
     <div class="card" style="padding: 0">
       <el-table :data="rows" row-key="id">
         <el-table-column type="expand"><template #default="{ row }">
@@ -77,6 +88,20 @@
       </el-form>
       <template #footer><el-button type="primary" @click="save">保存</el-button></template>
     </el-dialog>
+
+    <el-dialog v-model="autoDlg" title="金蝶领料单自动同步设置" width="460px">
+      <el-form label-width="90px">
+        <el-form-item label="自动同步"><el-switch v-model="auto.enabled" active-text="开启" inactive-text="关闭" /></el-form-item>
+        <el-form-item label="同步间隔">
+          <el-select v-model="auto.interval" :disabled="!auto.enabled" style="width: 100%">
+            <el-option v-for="m in sync.auto?.options || []" :key="m" :value="m" :label="`每 ${intervalText(m)}`" />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <div class="muted">按上次同步（含手动同步）时间加间隔，在之后的第一次定时巡检（每 15 分钟一次）时拉取；关闭后只能手动同步。
+        首次同步只拉 .env 里 K3_SYNC_START_DATE（默认今天往前 3 个月）之后的单据。</div>
+      <template #footer><el-button type="primary" @click="saveAuto">保存</el-button></template>
+    </el-dialog>
   </div>
 </template>
 
@@ -93,6 +118,17 @@ const q = ref('')
 const dlg = ref(false)
 const f = reactive({})
 const syncing = ref(false)
+const sync = ref({ configured: false })
+const autoDlg = ref(false)
+const auto = reactive({ enabled: true, interval: 15 })
+function intervalText(m) { return m % 60 ? `${m} 分钟` : `${m / 60} 小时` }
+async function loadSync() { if (hasRole('KEEPER', 'ADMIN')) sync.value = await api.get('/api/erp/docs/sync/status') }
+function openAuto() { Object.assign(auto, { enabled: sync.value.auto.enabled, interval: sync.value.auto.interval }); autoDlg.value = true }
+async function saveAuto() {
+  sync.value = await api.put('/api/erp/docs/sync/settings', { enabled: auto.enabled, interval: auto.interval })
+  ElMessage.success('已保存')
+  autoDlg.value = false
+}
 async function syncK3(full) {
   if (full) {
     try {
@@ -104,6 +140,7 @@ async function syncK3(full) {
     const r = await api.post(`/api/erp/docs/sync${full ? '?full=true' : ''}`)
     ElMessage[r.errors?.length ? 'warning' : 'success'](`金蝶领料单：取回 ${r.fetched}，新增 ${r.created}，更新 ${r.updated}，自动生成领用行 ${r.auto_bound}${r.errors?.length ? `，跳过 ${r.errors.length} 张（已派待办）` : ''}`)
     load()
+    loadSync()
   } finally { syncing.value = false }
 }
 async function load() { rows.value = await api.get(`/api/erp/docs?doc_type=${type.value || ''}&q=${encodeURIComponent(q.value)}`) }
@@ -124,5 +161,10 @@ async function doImport({ file }) { const r = await api.upload('/api/erp/docs/im
 async function togglePosted(row) { await api.post(`/api/erp/docs/${row.id}/posted?posted=${!row.posted}`); load() }
 async function finApprove(row) { await api.post(`/api/erp/docs/${row.id}/finance-approve`); ElMessage.success('已审核'); load() }
 async function receive(row) { await api.post(`/api/erp/docs/${row.id}/receive`); ElMessage.success('已确认'); load() }
-onMounted(load)
+onMounted(() => { load(); loadSync() })
 </script>
+
+<style scoped>
+.sync-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 16px; font-size: 13px; }
+.sync-bar .grow { flex: 1; }
+</style>

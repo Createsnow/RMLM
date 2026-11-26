@@ -443,6 +443,15 @@ class JobRun(Base):
     last_result: Mapped[str | None] = mapped_column(Text)  # 最近一次执行结果（同步任务用，JSON 文本）
 
 
+class SysSetting(Base):
+    """网页上可改的系统设置（键值）。目前只有金蝶领料单自动同步的开关与间隔；新表，启动时自动建，不改已有表。"""
+    __tablename__ = "sys_setting"
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[str] = mapped_column(Text)
+    updated_by: Mapped[int | None] = mapped_column(Integer)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, default=_now, onupdate=_now)
+
+
 # ---------------------------------------------------------------- 历史基线与双轨抽查（v1.1）
 class HistoryLine(Base):
     """旧台账导入的历史基线（只读）。只用于查询与总量核对：不生成领用行、不参与对账与验收指标。"""

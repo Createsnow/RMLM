@@ -185,9 +185,22 @@ def erp_doc_sync_status(user: User = Depends(current_user), db: Session = Depend
     return doc_sync.status(db)
 
 
+class DocAutoSyncIn(BaseModel):
+    enabled: bool
+    interval: int  # 分钟：15 / 30 / 60 / 120 / 240 / 480 / 720 / 1440
+
+
+@router.put("/erp/docs/sync/settings")
+def erp_doc_sync_settings(body: DocAutoSyncIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """修改金蝶领料单自动同步的开关与间隔（管理员）。只影响定时巡检，不影响手动同步。"""
+    require_role(user, "ADMIN")
+    doc_sync.save_auto_settings(db, user.id, body.enabled, body.interval)
+    return doc_sync.status(db)
+
+
 @router.post("/erp/docs/sync")
 def erp_doc_sync(full: bool = False, user: User = Depends(current_user), db: Session = Depends(get_db)):
-    """立即从金蝶拉取单据并自动生成领用行（定时任务每 15 分钟也会做）。默认增量，full=true 全量。"""
+    """立即从金蝶拉取单据并自动生成领用行（定时任务按网页设置的间隔也会做）。默认增量，full=true 全量。"""
     require_role(user, "KEEPER", "ADMIN")
     try:
         out = doc_sync.sync_docs(db, full=full)
