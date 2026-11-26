@@ -22,31 +22,23 @@ def _h(token):
     return {"Authorization": f"Bearer {token}"}
 
 
-# ------------------------------------------------------------------ 6 初始密码必须先改（密码登录时由后端拦）
-def test_must_change_password_enforced_by_server(org, ref):
+# ------------------------------------------------------------------ 6 不强制改密码（2026-11-26 业务确认），可随时自己改
+def test_initial_or_reset_password_not_forced_to_change(org, ref):
     org.ok(org.post("admin", "/api/users", {"username": "newbie", "name": "新人", "manager_id": ref.user("lead_a")}))
     tok = org.ok(_login(org, "newbie", "Rmlm@123456"))["token"]
-    me = org.c.get("/api/auth/me", headers=_h(tok)).json()
-    assert me["must_change_pw"] is True
-    r = org.c.get("/api/lines", headers=_h(tok))
-    assert r.status_code == 428 and "修改密码" in r.json()["detail"]
-    assert org.c.get("/api/dicts", headers=_h(tok)).status_code == 200
-    r = org.c.post("/api/auth/password", headers=_h(tok), json={"old": "Rmlm@123456", "new": "NewPassw0rd!"})
+    assert "must_change_pw" not in org.c.get("/api/auth/me", headers=_h(tok)).json()
+    assert org.c.get("/api/lines", headers=_h(tok)).status_code == 200  # 初始密码登录后各功能直接可用
+    # 管理员重置密码后同样不强制
+    body = {"username": "newbie", "name": "新人", "manager_id": ref.user("lead_a"), "roles": ["USER"],
+            "password": "Reset#2026x"}
+    org.ok(org.c.put(f"/api/users/{ref.user('newbie')}", json=body, headers=org._h("admin")))
+    tok = org.ok(_login(org, "newbie", "Reset#2026x"))["token"]
+    assert org.c.get("/api/lines", headers=_h(tok)).status_code == 200
+    # 本人随时可改：改完换发新凭证，旧凭证失效
+    r = org.c.post("/api/auth/password", headers=_h(tok), json={"old": "Reset#2026x", "new": "NewPassw0rd!"})
     new_tok = r.json()["token"]
     assert org.c.get("/api/lines", headers=_h(new_tok)).status_code == 200
-
-
-def test_wecom_login_not_blocked_by_initial_password(org):
-    """企微通讯录自动开的号密码随机、只用企微登录：不要求改密码。"""
-    from sqlalchemy import select
-
-    with dbmod.SessionLocal() as db:
-        user = db.scalar(select(User).where(User.username == "a1"))
-        user.must_change_pw = True
-        db.commit()
-        tok = make_token(user, "wx")
-    assert org.c.get("/api/lines", headers=_h(tok)).status_code == 200
-    assert org.c.get("/api/auth/me", headers=_h(tok)).json()["must_change_pw"] is False
+    assert org.c.get("/api/lines", headers=_h(tok)).status_code == 401
 
 
 # ------------------------------------------------------------------ 7 连续输错 5 次锁定 15 分钟

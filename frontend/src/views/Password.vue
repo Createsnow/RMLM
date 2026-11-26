@@ -1,6 +1,7 @@
 <template>
   <div class="card" style="max-width: 420px">
     <h3>修改密码</h3>
+    <p class="muted" style="margin: 0 0 12px">改密码后，其他设备上的登录会失效，需要重新登录。通过企业微信自动开通的账号不知道原密码，需要电脑端登录时请联系管理员重置密码。</p>
     <el-form label-position="top">
       <el-form-item label="原密码"><el-input v-model="f.old" type="password" show-password /></el-form-item>
       <el-form-item label="新密码（至少 8 位）"><el-input v-model="f.new" type="password" show-password /></el-form-item>

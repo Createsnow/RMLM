@@ -17,14 +17,6 @@ async function request(method, url, body, opts = {}) {
   if (!resp.ok) {
     const msg = (data && (typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail))) || `请求失败（${resp.status}）`
     if (resp.status === 401) logout()
-    if (resp.status === 428) {
-      // 用初始密码 / 被重置的密码登录：后端只放行修改密码，直接跳到修改密码页
-      const target = location.pathname.startsWith('/m') ? '/m/password' : '/password'
-      if (location.pathname !== target) location.href = target
-      const err = new Error(msg)
-      err.status = 428
-      throw err
-    }
     if (!opts.silent) ElMessage.error(msg)
     const err = new Error(msg)
     err.status = resp.status

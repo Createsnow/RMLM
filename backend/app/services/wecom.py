@@ -390,7 +390,7 @@ def sync_contacts(db: Session, client: WeComClient | None = None) -> dict:
                 continue
             username = uid if uid not in usernames else f"wx_{uid}"
             u = User(username=username[:64], name=name or uid, title=info.get("position") or None,
-                     roles="USER", wecom_userid=uid, must_change_pw=True,
+                     roles="USER", wecom_userid=uid, must_change_pw=False,
                      password_hash=hash_password(secrets.token_urlsafe(16)))
             db.add(u)
             db.flush()

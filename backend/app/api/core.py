@@ -16,7 +16,7 @@ from ..models import (AuditLog, Delegate, DictChange, DictItem, Freeze, LedgerLi
                       Todo, User)
 from ..perms import (ROLES, ancestors, can_view_line, descendants, has_role, require_role, validate_delegate,
                      visible_user_ids)
-from ..security import current_user, hash_password, make_token, must_change_now, verify_password
+from ..security import current_user, hash_password, make_token, verify_password
 from ..services import erp as erpsvc
 from ..services import jobs, ledger, master_sync, wecom
 from ..services.k3cloud import K3Error
@@ -80,7 +80,6 @@ def me(request: Request, user: User = Depends(current_user), db: Session = Depen
     d["delegated_by"] = [p.name for p in db.scalars(
         select(User).join(Delegate, Delegate.principal_id == User.id).where(
             Delegate.agent_id == user.id, Delegate.start_at <= clock.now(), Delegate.end_at >= clock.now()))]
-    d["must_change_pw"] = must_change_now(user, getattr(request.state, "login_method", None))
     return d
 
 
@@ -157,7 +156,7 @@ def create_user(body: UserIn, user: User = Depends(current_user), db: Session = 
     if db.scalar(select(User.id).where(User.username == body.username.strip())):
         raise BizError("账号已存在")
     u = User(username=body.username.strip(), password_hash=hash_password(body.password or "Rmlm@123456"),
-             must_change_pw=True)
+             must_change_pw=False)
     _apply_user(db, u, body)
     db.add(u)
     db.flush()
@@ -177,7 +176,7 @@ def update_user(uid: int, body: UserIn, user: User = Depends(current_user), db: 
         db.flush()
         reassign_user_requests(db, u)
     if body.password:
-        u.password_hash, u.must_change_pw = hash_password(body.password), True
+        u.password_hash, u.must_change_pw = hash_password(body.password), False  # 不强制改密码，本人可随时在“修改密码”里改
         u.token_version = (u.token_version or 0) + 1  # 重置密码：此前发出的登录凭证全部失效
         u.failed_logins, u.locked_until = 0, None  # 顺带解除锁定
     if not body.active and u.active:
@@ -248,7 +247,7 @@ def import_users(file: UploadFile = File(...), user: User = Depends(current_user
         if wx and db.scalar(select(User.id).where(User.wecom_userid == wx)):
             wx = None
         u = User(username=username, name=name, title=str(r[1] or ""), password_hash=hash_password("Rmlm@123456"),
-                 roles=",".join(sorted((roles & set(ROLES)) | {"USER"})), must_change_pw=True, wecom_userid=wx)
+                 roles=",".join(sorted((roles & set(ROLES)) | {"USER"})), must_change_pw=False, wecom_userid=wx)
         db.add(u)
         by_name[name] = u
         created += 1
