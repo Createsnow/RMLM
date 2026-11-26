@@ -75,7 +75,7 @@ def _sign_precheck(db: Session, line: LedgerLine, op: User) -> ErpLine | None:
     if line.signed:
         raise BizError(f"{line.code} 已签收")
     if op.id != line.holder_id:
-        raise forbid("签收必须由使用人本人操作，不允许代登")
+        raise forbid("签收必须由使用人本人操作，不允许代录")
     erp = db.get(ErpLine, line.erp_line_id) if line.erp_line_id else None
     if not line.urgent and (not erp or not erp.doc.posted):
         raise BizError("ERP 单据尚未过账，不能签收")

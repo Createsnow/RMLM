@@ -78,7 +78,7 @@ async function bind(row) {
   const r = await api.post(`/api/scrap/batches/${row.id}/bind?erp_doc_id=${pick[row.id]}`)
   const rest = Number(r.batch_rest || 0)
   if (rest > 0) ElMessage.warning(`报废单不够摊，批次还剩 ${r.batch_rest} 未核销，请再挂一张报废单`)
-  else ElMessage[r.leftover.length ? 'warning' : 'success'](r.leftover.length ? '已核销，有未摊完数量进入差异池' : '已核销')
+  else ElMessage[r.leftover.length ? 'warning' : 'success'](r.leftover.length ? '已核销，有未摊完数量进入对账差异' : '已核销')
   load()
 }
 useRefresh(load)

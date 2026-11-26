@@ -1,6 +1,6 @@
 <template>
   <div>
-    <div class="page-head"><h2>开单绑定</h2><span class="sub">在金蝶开领料单时请在备注里写中台申请号，系统自动匹配；匹配不上再手工绑定（一物一行）</span></div>
+    <div class="page-head"><h2>出库开单</h2><span class="sub">在金蝶开领料单时请在备注里写中台申请号，系统自动匹配；匹配不上再手工绑定（一物一行）</span></div>
     <div class="card" v-if="ext.length">
       <h3>外部受让待认领（{{ ext.length }}）<span class="muted">受让人不在通讯录；指派到系统账号后由受让人确认，确认前持有人不变</span></h3>
       <el-table :data="ext" size="small">

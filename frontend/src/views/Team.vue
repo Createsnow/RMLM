@@ -1,6 +1,6 @@
 <template>
   <div>
-    <div class="page-head"><h2>本组人员</h2><span class="sub">您的下属（逐级）；被冻结的人由直属上级处理后解冻</span></div>
+    <div class="page-head"><h2>我的团队</h2><span class="sub">您的下属（逐级）；被冻结的人由直属上级处理后解冻</span></div>
     <div class="card" style="padding: 0">
       <el-table :data="rows">
         <el-table-column prop="name" label="姓名" width="100" />

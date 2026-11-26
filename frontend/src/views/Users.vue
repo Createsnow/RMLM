@@ -1,7 +1,7 @@
 <template>
   <div>
     <div class="page-head">
-      <h2>账号管理</h2><span class="sub">创建账号时勾选角色；"直属上级"由上下级关系自动得出，不是角色</span>
+      <h2>用户管理</h2><span class="sub">创建账号时勾选角色；"直属上级"由上下级关系自动得出，不是角色</span>
       <span class="grow" />
       <el-checkbox v-model="inactive" @change="load">含已停用</el-checkbox>
       <el-input v-model="q" placeholder="姓名 / 账号" clearable style="width: 160px" @change="load" />

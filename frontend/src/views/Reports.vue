@@ -1,6 +1,6 @@
 <template>
   <div>
-    <div class="page-head"><h2>报表</h2><span class="sub">数据范围按您的权限</span></div>
+    <div class="page-head"><h2>统计报表</h2><span class="sub">数据范围按您的权限</span></div>
     <el-tabs v-model="tab" @tab-change="load">
       <el-tab-pane label="周报挂账" name="weekly">
         <div v-if="weekly">

@@ -125,32 +125,37 @@ const menu = computed(() => {
   const mgr = u.is_manager || (u.delegated_by || []).length
   const groups = [
     { title: '工作台', icon: 'Monitor', items: [
-      { path: '/', name: '总览看板' },
+      { path: '/', name: '首页' },
       { path: '/todos', name: '我的待办', badge: todoCount.value },
       { path: '/scan', name: '扫码' }
     ] },
-    { title: '领料', icon: 'Document', items: [
+    { title: '领用管理', icon: 'Document', items: [
       { path: '/reqs', name: '领料申请' },
       ...(mgr ? [{ path: '/approve', name: '待我审核' }] : []),
       { path: '/ledger', name: '领用台账' },
-      ...(u.is_manager ? [{ path: '/team', name: '本组人员' }] : [])
+      ...(u.is_manager ? [{ path: '/team', name: '我的团队' }] : [])
     ] }
   ]
-  const ops = []
-  if (hasRole('KEEPER')) ops.push({ path: '/issue', name: '开单绑定' })
-  if (hasRole('KEEPER', 'FINANCE', 'WAREHOUSE', 'ADMIN')) ops.push({ path: '/erp', name: 'ERP 单据' })
-  if (hasRole('KEEPER', 'WAREHOUSE', 'ADMIN')) ops.push({ path: '/dispose', name: '退库 / 报废' })
-  if (hasRole('KEEPER', 'FINANCE', 'ADMIN', 'DEPT_HEAD', 'VP')) ops.push({ path: '/recon', name: '对账与关账' })
-  if (hasRole('KEEPER', 'ADMIN', 'FINANCE')) ops.push({ path: '/reversals', name: '冲销' })
-  if (ops.length) groups.push({ title: '物料作业', icon: 'Box', items: ops })
-  const mg = [{ path: '/reports', name: '报表' }]
-  if (hasRole('KEEPER', 'ADMIN', 'WAREHOUSE')) mg.push({ path: '/master', name: '主数据' })
-  if (hasRole('KEEPER', 'ADMIN', 'FINANCE', 'DEPT_HEAD', 'VP', 'WAREHOUSE')) mg.push({ path: '/history', name: '历史基线' })
-  mg.push({ path: '/dicts', name: '字典与规则' })
-  if (hasRole('ADMIN')) mg.push({ path: '/users', name: '账号管理' }, { path: '/audit', name: '审计日志' })
-  groups.push({ title: '管理', icon: 'Setting', items: mg })
-  for (const g of groups) g.badge = g.items.reduce((n, m) => n + (m.badge || 0), 0)
-  return groups
+  // 模块按 ERP 惯例划分：业务（领用、仓库作业）→ 财务（对账、冲销、报表）→ 基础数据 → 系统管理；没有可见菜单的分组不显示
+  const wh = []
+  if (hasRole('KEEPER')) wh.push({ path: '/issue', name: '出库开单' })
+  if (hasRole('KEEPER', 'FINANCE', 'WAREHOUSE', 'ADMIN')) wh.push({ path: '/erp', name: 'ERP 单据' })
+  if (hasRole('KEEPER', 'WAREHOUSE', 'ADMIN')) wh.push({ path: '/dispose', name: '退库与报废' })
+  groups.push({ title: '仓库作业', icon: 'Box', items: wh })
+  const fin = []
+  if (hasRole('KEEPER', 'FINANCE', 'ADMIN', 'DEPT_HEAD', 'VP')) fin.push({ path: '/recon', name: '对账与关账' })
+  if (hasRole('KEEPER', 'ADMIN', 'FINANCE')) fin.push({ path: '/reversals', name: '冲销' })
+  fin.push({ path: '/reports', name: '统计报表' })
+  groups.push({ title: '对账与报表', icon: 'Money', items: fin })
+  const base = []
+  if (hasRole('KEEPER', 'ADMIN', 'WAREHOUSE')) base.push({ path: '/master', name: '基础资料' })
+  base.push({ path: '/dicts', name: '数据字典' })
+  if (hasRole('KEEPER', 'ADMIN', 'FINANCE', 'DEPT_HEAD', 'VP', 'WAREHOUSE')) base.push({ path: '/history', name: '历史台账' })
+  groups.push({ title: '基础数据', icon: 'Coin', items: base })
+  if (hasRole('ADMIN')) groups.push({ title: '系统管理', icon: 'Setting', items: [{ path: '/users', name: '用户管理' }, { path: '/audit', name: '审计日志' }] })
+  const shown = groups.filter(g => g.items.length)
+  for (const g of shown) g.badge = g.items.reduce((n, m) => n + (m.badge || 0), 0)
+  return shown
 })
 
 // 详情、新建等不在菜单里的页面，高亮其所属的菜单项
@@ -159,8 +164,8 @@ const menuOf = key => MENU_OF[key] || key
 const activeMenu = computed(() => menuOf(tabKeyOf(route)))
 const groupOf = key => menu.value.find(g => g.items.some(m => m.path === menuOf(key)))?.title || ''
 const currentGroup = computed(() => groupOf(tabKeyOf(route)))
-// 默认展开：工作台、领料、当前页所在分组；用户手动展开 / 收起过的分组按其选择
-const isOpen = t => t in groupState.value ? groupState.value[t] : (t === '工作台' || t === '领料' || t === currentGroup.value)
+// 默认展开：工作台、领用管理、当前页所在分组；用户手动展开 / 收起过的分组按其选择
+const isOpen = t => t in groupState.value ? groupState.value[t] : (t === '工作台' || t === '领用管理' || t === currentGroup.value)
 const openeds = computed(() => menu.value.map(g => g.title).filter(isOpen))
 const roleText = computed(() => {
   const r = store.user?.role_names || []

@@ -82,7 +82,7 @@ def test_consume_loss_and_proxy(org, ref):
     assert out["loss"] == "0.7" and out["balance"] == "5.3"
     # 同组成员可代登并留痕通知；其他组成员不行
     out = org.ok(org.post("a2", f"/api/lines/{lid}/consume", {"qty": 1, "dest": "D01", "ship_no": "XSCK-T001", "photos": [org.photo("a2")]}))
-    assert "代登" in out["flags"]
+    assert "代录" in out["flags"]
     todos = org.ok(org.get("a1", "/api/todos"))
     assert any("代您登记" in t["title"] for t in todos)
     assert org.post("b1", f"/api/lines/{lid}/consume",

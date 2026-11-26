@@ -93,7 +93,7 @@ def proxy_check(db: Session, op: User, holder: User) -> bool:
         return False
     if holder.manager_id == op.id or same_group(op, holder) or has_role(op, "KEEPER"):
         return True
-    raise forbid("只能操作本人持有的物料；代登仅限同组成员、直属上级或领料专员")
+    raise forbid("只能操作本人持有的物料；代录仅限同组成员、直属上级或领料专员")
 
 
 # ------------------------------------------------------------------ 审核路由

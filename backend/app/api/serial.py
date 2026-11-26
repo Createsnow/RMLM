@@ -108,7 +108,7 @@ def line_out(db: Session, line: LedgerLine, viewer: User, c=None, full: bool = F
     if holder.frozen:
         flags.append("冻结")
     if c.proxy_events:
-        flags.append("代登")
+        flags.append("代录")
     if line.self_issue:
         flags.append("自领自开")
     if st not in ("S6", "S7") and (c.scrap_pending > 0 or c.return_pending > 0):

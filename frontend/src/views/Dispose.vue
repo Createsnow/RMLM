@@ -1,7 +1,7 @@
 <template>
   <div>
     <div class="page-head">
-      <h2>退库 / 报废工作台</h2>
+      <h2>退库与报废</h2>
       <span class="sub">多行明细 → 一次匹配到一张 ERP 单；整件报废先入暂存箱、每周按箱批次开单。残料直接按损耗清零，不进这里。</span>
     </div>
     <el-tabs v-model="tab">

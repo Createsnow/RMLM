@@ -3,7 +3,7 @@
     <div class="head">
       <b>{{ line.material }}</b> <span class="mono">{{ line.code }}</span><br />
       <span class="muted">结存 <b class="num">{{ line.balance }}</b> {{ line.unit }} · 持有人 {{ line.holder }}</span>
-      <el-tag v-if="isProxy" type="warning" size="small" style="margin-left: 6px">代登，将通知持有人</el-tag>
+      <el-tag v-if="isProxy" type="warning" size="small" style="margin-left: 6px">代录，将通知持有人</el-tag>
     </div>
     <el-form label-position="top" @submit.prevent>
       <template v-if="kind === 'sign' && needCodes">

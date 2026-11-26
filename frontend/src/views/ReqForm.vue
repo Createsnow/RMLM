@@ -46,7 +46,7 @@
           <el-input v-model="f.urgent_note" placeholder="如：组长 11/2 9:00 电话同意" />
           <div class="muted">领料专员可先交接，24 小时内须补齐系统审核和金蝶单，否则进挂账；补审被驳回须全额退库。</div>
         </el-form-item>
-        <el-form-item label="物料（扫码或从主数据选择）" required>
+        <el-form-item label="物料（扫码或从基础资料选择）" required>
           <div v-for="(it, i) in f.items" :key="i" class="item">
             <RemoteSelect v-model="it.material_id" kind="material" style="flex: 2" @picked="m => (it.m = m)" />
             <el-input-number v-model="it.qty" :min="0" :precision="3" style="width: 150px" />

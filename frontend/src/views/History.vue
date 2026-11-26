@@ -1,8 +1,8 @@
 <template>
   <div>
     <div class="page-head">
-      <h2>历史基线</h2>
-      <span class="sub">旧台账有效明细导入为只读基线，只用于查询与总量核对；不生成领用行、不进差异池、不计入验收指标</span>
+      <h2>历史台账</h2>
+      <span class="sub">旧台账有效明细一次导入、只读，只用于查询与总量核对；不生成领用行、不进对账差异、不计入验收指标</span>
       <span class="grow" />
       <el-upload v-if="hasRole('KEEPER', 'ADMIN')" :show-file-list="false" accept=".xlsx" :http-request="upload">
         <el-button type="primary"><el-icon><Upload /></el-icon>导入旧台账 Excel</el-button>
@@ -24,7 +24,7 @@
     </div>
 
     <el-tabs v-model="tab" @tab-change="load">
-      <el-tab-pane label="基线明细" name="rows">
+      <el-tab-pane label="历史明细" name="rows">
         <div class="filters">
           <el-input v-model="q" placeholder="单号 / 物料 / 领用人" clearable style="width: 200px" @change="load" />
           <el-select v-model="dest" clearable placeholder="去向" style="width: 160px" @change="load">

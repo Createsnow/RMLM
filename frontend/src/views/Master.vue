@@ -1,6 +1,6 @@
 <template>
   <div>
-    <div class="page-head"><h2>主数据</h2><span class="sub">物料从金蝶只读同步（每天自动增量，也可手动）；项目暂用 Excel 导入；库位、工位、报废箱在此维护</span></div>
+    <div class="page-head"><h2>基础资料</h2><span class="sub">物料从金蝶只读同步（每天自动增量，也可手动）；项目暂用 Excel 导入；库位、工位、报废箱在此维护</span></div>
     <el-tabs v-model="tab" @tab-change="load">
       <el-tab-pane label="项目" name="project" />
       <el-tab-pane label="物料" name="material" />

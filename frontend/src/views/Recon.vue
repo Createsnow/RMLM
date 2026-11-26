@@ -24,7 +24,7 @@
       </el-table>
     </div>
     <div class="card">
-      <h3>差异池
+      <h3>对账差异
         <el-radio-group v-model="state" size="small" style="margin-left: 10px" @change="load">
           <el-radio-button value="">全部</el-radio-button><el-radio-button value="OPEN">待认领</el-radio-button>
           <el-radio-button value="CLAIMED">处理中</el-radio-button><el-radio-button value="RESOLVED">已平</el-radio-button>

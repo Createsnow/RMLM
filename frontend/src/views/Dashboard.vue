@@ -1,6 +1,6 @@
 <template>
   <div v-if="d">
-    <div class="page-head"><h2>总览看板</h2><span class="sub">数据截至 {{ d.today }} · 数据范围按您的权限 · 在制口径：领用 − 耗用 − 损耗 − 退库 − 报废</span></div>
+    <div class="page-head"><h2>首页</h2><span class="sub">数据截至 {{ d.today }} · 数据范围按您的权限 · 在制口径：领用 − 耗用 − 损耗 − 退库 − 报废</span></div>
     <div class="kpis">
       <div class="kpi b"><div class="l">在制结存行数</div><div class="v">{{ d.counts.active }}</div><div class="s">涉及 {{ d.counts.projects }} 个项目 · ¥{{ fmtMoney(d.counts.balance_amount) }}</div></div>
       <div class="kpi" :class="{ bad: d.counts.overdue }"><div class="l">超期未结案</div><div class="v">{{ d.counts.overdue }}</div><div class="s">超预计归还日仍未处置</div></div>
@@ -43,7 +43,7 @@
         <el-table-column label="数量" width="100" align="right"><template #default="{ row }"><span class="num">{{ +row.qty ? `${row.qty} ${row.unit}` : '—' }}</span></template></el-table-column>
         <el-table-column prop="material" label="物料" min-width="120" />
         <el-table-column label="去向 / 位置" min-width="130"><template #default="{ row }">{{ row.dest ? dictName('DEST', row.dest) : '' }}{{ row.where ? ` ${row.where}` : '' }}{{ !row.dest && !row.where ? '—' : '' }}</template></el-table-column>
-        <el-table-column label="经手人" width="100"><template #default="{ row }">{{ row.operator }}<el-tag v-if="row.is_proxy" size="small" type="warning" style="margin-left: 4px">代登</el-tag></template></el-table-column>
+        <el-table-column label="经手人" width="100"><template #default="{ row }">{{ row.operator }}<el-tag v-if="row.is_proxy" size="small" type="warning" style="margin-left: 4px">代录</el-tag></template></el-table-column>
         <el-table-column label="ERP 单据" width="170"><template #default="{ row }">
           <span v-if="row.erp_doc_no" class="mono">{{ row.erp_doc_no }}</span>
           <span v-else-if="row.needs_doc" style="color: #c0392b">未关联</span>
@@ -90,8 +90,8 @@ const metricRows = computed(() => {
   return [
     row('项目关联率', true, '100%', g.project_link_rate, g.project_link_rate === 100, '领用行项目命中 ERP 项目档案的占比'),
     row('码绑定率', true, '≥ 95%', g.code_bind_rate, g.code_bind_rate >= 95, '已绑仓储条码的行 / 已签收行'),
-    row('代登率（签收除外）', true, '< 10%', g.proxy_rate, g.proxy_rate < 10, '经手人 ≠ 持有人的事件占比'),
-    row('对账差异关闭率', false, '月末 100%', o.recon_close_rate, o.recon_close_rate === 100, '差异池中已平的占比'),
+    row('代录率（签收除外）', true, '< 10%', g.proxy_rate, g.proxy_rate < 10, '经手人 ≠ 持有人的事件占比'),
+    row('对账差异关闭率', false, '月末 100%', o.recon_close_rate, o.recon_close_rate === 100, '对账差异中已平的占比'),
     row('报废单据覆盖率', false, '≥ 95%', o.scrap_doc_rate, o.scrap_doc_rate >= 95, '已挂 ERP 报废单的整件报废 / 已判废'),
     row('超期挂账清理率', false, '首季 ≥ 80%', o.overdue_clear_rate, o.overdue_clear_rate >= 80, '本季清理行数 / 季初挂账行数')
   ]
