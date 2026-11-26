@@ -171,6 +171,24 @@ def health():
     return {"ok": True}
 
 
+# 容器健康检查（Docker HEALTHCHECK / compose healthcheck）：live 只看进程活着；ready 还要能连上数据库，
+# web 容器等 api 就绪后才启动
+@app.get("/health/live", include_in_schema=False)
+def health_live():
+    return {"status": "UP"}
+
+
+@app.get("/health/ready", include_in_schema=False)
+def health_ready():
+    try:
+        with dbmod.engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+    except Exception:
+        log.warning("health/ready: 数据库连接失败", exc_info=True)
+        return JSONResponse({"status": "DOWN", "db": "DOWN"}, status_code=503)
+    return {"status": "UP", "db": "UP"}
+
+
 # 前端（构建产物）
 if settings.static_dir.exists():
     app.mount("/assets", StaticFiles(directory=settings.static_dir / "assets"), name="assets")

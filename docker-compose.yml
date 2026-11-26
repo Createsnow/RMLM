@@ -1,0 +1,93 @@
+# 研发物料管家 RMLM：api（FastAPI）+ web（nginx 托管页面并转发 /api），可选随附 MySQL 8（db）。
+# 在仓库根目录：cp .env.example .env，改好后 docker compose up -d --build。详见 README「部署（Docker）」
+name: rmlm
+
+# 容器日志轮转：服务都只写标准输出，Docker 默认的 json-file 不限大小，不配会一直写满宿主机磁盘。
+# 每个容器最多 LOG_MAX_FILE 个文件、每个 LOG_MAX_SIZE（默认 50m × 10），可在 .env 里改
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "${LOG_MAX_SIZE:-50m}"
+    max-file: "${LOG_MAX_FILE:-10}"
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
+    image: rmlm-api:1.0.0
+    restart: unless-stopped
+    # 停机时等进行中的请求处理完的最长时间（应用自身最多约 15 秒），超时才强制结束；Docker 默认只等 10 秒
+    stop_grace_period: 30s
+    logging: *logging
+    # 与本机运行（start.py）共用仓库根目录的 .env
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+      # 登录令牌密钥必须设置（服务端还会拒绝少于 16 位或示例值的密钥）
+      RMLM_JWT_SECRET: ${RMLM_JWT_SECRET:?请在 .env 中设置 RMLM_JWT_SECRET（至少 16 位随机字符）}
+      # 容器内路径固定，.env 里为本机运行写的路径在这里不生效
+      RMLM_PHOTO_DIR: /data/photos
+      RMLM_WATERMARK_FONT: /usr/share/fonts/truetype/wqy/wqy-zenhei.ttc
+    volumes:
+      - photos:/data/photos   # 照片永久保存，务必纳入备份（deploy/backup.sh）
+    depends_on:
+      # 只有启用随附数据库（COMPOSE_PROFILES=db）时才等它就绪；连公司 MySQL 时忽略
+      db:
+        condition: service_healthy
+        required: false
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=3)"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 60s
+
+  web:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org}
+    image: rmlm-web:1.0.0
+    restart: unless-stopped
+    stop_grace_period: 30s
+    logging: *logging
+    # 对外只开这一个端口；api 容器的 8000 不对宿主机开放
+    ports:
+      - "${WEB_PORT:-8000}:80"
+    depends_on:
+      api:
+        condition: service_healthy
+
+  # 随附 MySQL 8：没有公司 MySQL 时用。在 .env 里设 COMPOSE_PROFILES=db、DB_HOST=db 启用；
+  # 库名、账号、密码取 .env 的 DB_NAME / DB_USER / DB_PASSWORD，首次启动自动建库建号
+  db:
+    image: mysql:8.0
+    profiles: ["db"]
+    restart: unless-stopped
+    logging: *logging
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-}
+      MYSQL_DATABASE: ${DB_NAME:-rmlm}
+      MYSQL_USER: ${DB_USER:-rmlm}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-}
+      TZ: ${TZ:-Asia/Shanghai}
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_0900_ai_ci", "--default-time-zone=+08:00"]
+    volumes:
+      - mysql:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1"]
+      interval: 10s
+      retries: 10
+
+# 数据卷名可在 .env 里改：从旧版 deploy/ 目录部署升级时，设成旧卷名沿用原有数据（见 README）
+volumes:
+  photos:
+    name: ${PHOTO_VOLUME:-rmlm_photos}
+  mysql:
+    name: ${MYSQL_VOLUME:-rmlm_mysql}
