@@ -3,6 +3,9 @@
 
     python start.py            一键启动（首次会自动建虚拟环境、安装依赖、构建前端）
     python start.py rebuild    重新构建前端后启动（改了 frontend/ 代码后用）
+    python start.py stop       停止正在运行的服务（在另一个终端里，或服务在后台运行时用）
+
+前台运行时按 Ctrl+C 停止：等正在处理的请求结束（最多约 15 秒），再按一次立即强制停止。
 
 配置写在仓库根目录的 .env（首次运行会从 .env.example 复制一份）。
 本脚本只用 Python 标准库，可以直接用系统里的 Python 运行。
@@ -11,9 +14,11 @@ import argparse
 import filecmp
 import os
 import shutil
+import signal
 import socket
 import subprocess
 import sys
+import time
 import venv
 from pathlib import Path
 
@@ -23,6 +28,9 @@ FRONTEND = ROOT / "frontend"
 VENV = BACKEND / ".venv"
 WINDOWS = os.name == "nt"
 VENV_PY = VENV / ("Scripts/python.exe" if WINDOWS else "bin/python")
+PID_FILE = BACKEND / "data" / "rmlm.pid"  # 内容："启动脚本进程号 服务进程号"
+GRACEFUL_SECONDS = 10  # uvicorn 等正在处理的请求结束的上限
+STOP_WAIT = 30  # 超过这个时间服务还没退出，就强制结束
 
 
 def say(msg: str) -> None:
@@ -125,15 +133,139 @@ def check_port(host: str, port: int) -> None:
         try:
             s.bind(("" if host == "0.0.0.0" else host, port))
         except OSError:
-            fail(f"端口 {port} 已被占用（可能系统已经在运行），请先关闭占用程序，或在 .env 里修改 RMLM_PORT")
+            fail(f"端口 {port} 已被占用（可能系统已经在运行）。先运行 python start.py stop 停止服务，"
+                 "若仍被占用请关闭占用该端口的程序，或在 .env 里修改 RMLM_PORT")
+
+
+# ---------------------------------------------------------------- 进程管理
+def alive(pid: int, marker: str) -> bool:
+    """进程还在，且命令行里含 marker（防止进程号被系统复用后误杀别的程序）。"""
+    if pid <= 0:
+        return False
+    if WINDOWS:
+        out = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
+                             capture_output=True, text=True, errors="replace").stdout
+        return f'"{pid}"' in out and "python" in out.lower()  # Windows 这里拿不到命令行，只核对是 Python 进程
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        pass
+    out = subprocess.run(["ps", "-o", "command=", "-p", str(pid)], capture_output=True, text=True).stdout
+    return marker in out
+
+
+def read_pids() -> tuple[int, int]:
+    try:
+        a, b = PID_FILE.read_text().split()
+        return int(a), int(b)
+    except (OSError, ValueError):
+        return 0, 0
+
+
+def kill_tree(pid: int) -> None:
+    """强制结束服务进程及其子进程。"""
+    if WINDOWS:
+        subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True)
+    else:
+        try:
+            os.killpg(pid, signal.SIGKILL)  # 服务进程单独一个进程组，组号 = 进程号
+        except (ProcessLookupError, PermissionError):
+            pass
+
+
+def wait_gone(pid: int, marker: str, seconds: float) -> bool:
+    end = time.monotonic() + seconds
+    while time.monotonic() < end:
+        if not alive(pid, marker):
+            return True
+        time.sleep(0.3)
+    return not alive(pid, marker)
+
+
+def stop() -> None:
+    launcher, server = read_pids()
+    up_l, up_s = alive(launcher, "start.py"), alive(server, "uvicorn")
+    if not (up_l or up_s):
+        PID_FILE.unlink(missing_ok=True)
+        say("服务没有在运行")
+        return
+    say("正在停止服务…")
+    if WINDOWS:
+        # Windows 无法给另一个控制台里的程序发 Ctrl+C，只能直接结束
+        for pid in (server, launcher):
+            if alive(pid, ""):
+                kill_tree(pid)
+    elif up_l:
+        os.kill(launcher, signal.SIGTERM)  # 启动脚本收到后会让服务正常退出，超时再强制结束
+        wait_gone(launcher, "start.py", STOP_WAIT + 5)
+    else:  # 启动脚本已经不在了，服务还在
+        try:
+            os.killpg(server, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        if not wait_gone(server, "uvicorn", STOP_WAIT):
+            kill_tree(server)
+    if alive(launcher, "start.py") or alive(server, "uvicorn"):
+        fail("服务没能停止，请手动结束 Python 进程")
+    PID_FILE.unlink(missing_ok=True)
+    say("服务已停止")
+
+
+def serve(cmd: list, env: dict) -> int:
+    """启动 uvicorn 并等它退出。Ctrl+C / 被 kill / 关闭终端时让 uvicorn 正常退出，超时再强制结束。"""
+    # Linux / macOS：服务单独一个进程组，Ctrl+C 只发给本脚本，由本脚本转发一次，避免 uvicorn 收到两次直接强退。
+    # Windows：同一控制台的 Ctrl+C 本来就会同时发给 uvicorn。
+    child = subprocess.Popen(cmd, cwd=BACKEND, env=env, **({} if WINDOWS else {"process_group": 0}))
+    PID_FILE.parent.mkdir(parents=True, exist_ok=True)
+    PID_FILE.write_text(f"{os.getpid()} {child.pid}")
+    deadline = None
+
+    def request_stop(signum, _frame):
+        nonlocal deadline
+        if deadline is not None:
+            say("强制停止")
+            kill_tree(child.pid)
+            return
+        deadline = time.monotonic() + STOP_WAIT
+        print(flush=True)
+        say("正在停止服务，等待正在处理的请求结束…（再按一次 Ctrl+C 立即强制停止）")
+        if not WINDOWS:
+            child.send_signal(signal.SIGINT)
+
+    for name in ("SIGINT", "SIGTERM", "SIGHUP", "SIGBREAK"):
+        if hasattr(signal, name):
+            signal.signal(getattr(signal, name), request_stop)
+    try:
+        while True:
+            try:
+                code = child.wait(timeout=0.5)  # 带超时轮询：Windows 上无限等待时收不到 Ctrl+C
+                break
+            except subprocess.TimeoutExpired:
+                if deadline is not None and time.monotonic() > deadline:
+                    say(f"服务 {STOP_WAIT} 秒内没有退出，强制停止")
+                    kill_tree(child.pid)
+                    deadline = time.monotonic() + 5
+    finally:
+        if read_pids() == (os.getpid(), child.pid):
+            PID_FILE.unlink(missing_ok=True)
+    if deadline is not None:
+        say("服务已停止")
+        return 0
+    return code
 
 
 # ---------------------------------------------------------------- 主流程
 def main() -> None:
     parser = argparse.ArgumentParser(description="研发物料管家本地一键启动")
-    parser.add_argument("mode", nargs="?", default="start", choices=["start", "rebuild"],
-                        help="start：一键启动（默认）；rebuild：重新构建前端后启动")
+    parser.add_argument("mode", nargs="?", default="start", choices=["start", "rebuild", "stop"],
+                        help="start：一键启动（默认）；rebuild：重新构建前端后启动；stop：停止正在运行的服务")
     args = parser.parse_args()
+
+    if args.mode == "stop":
+        stop()
+        return
 
     if sys.version_info < (3, 11):
         fail(f"Python 版本过低（{sys.version.split()[0]}），需要 3.11 及以上")
@@ -145,16 +277,16 @@ def main() -> None:
     ensure_backend()
     if args.mode == "rebuild" or not (Path(env["RMLM_STATIC_DIR"]) / "index.html").exists():
         build_frontend()
+    launcher, server = read_pids()
+    if alive(launcher, "start.py") or alive(server, "uvicorn"):
+        fail("服务已经在运行。要重启请先运行 python start.py stop")
     check_db(env)
     check_port(host, port)
 
     say(f"启动完成后浏览器打开 http://localhost:{port}  （Ctrl+C 停止）")
-    cmd = [str(VENV_PY), "-m", "uvicorn", "app.main:app", "--host", host, "--port", str(port)]
-    try:
-        code = subprocess.call(cmd, cwd=BACKEND, env=env)
-    except KeyboardInterrupt:
-        code = 0
-    sys.exit(code)
+    cmd = [str(VENV_PY), "-m", "uvicorn", "app.main:app", "--host", host, "--port", str(port),
+           "--timeout-graceful-shutdown", str(GRACEFUL_SECONDS)]
+    sys.exit(serve(cmd, env))
 
 
 if __name__ == "__main__":

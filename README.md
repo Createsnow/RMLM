@@ -50,6 +50,11 @@ python start.py            # 一键启动
 ```bash
 python start.py rebuild    # 改了前端代码后：重建前端再启动
 ```
+```bash
+python start.py stop       # 停止服务（在另一个终端里，或服务在后台运行时）
+```
+
+前台运行时按 **Ctrl+C** 停止：会等正在处理的请求结束（最多约 15 秒），再按一次立即强制停止。提示"端口已被占用"时，先运行 `python start.py stop`。
 
 `start.py` 只用 Python 标准库，会自动完成：
 - 首次运行时从 `.env.example` 生成 `.env`；
