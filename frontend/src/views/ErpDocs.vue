@@ -96,7 +96,7 @@ const syncing = ref(false)
 async function syncK3(full) {
   if (full) {
     try {
-      await ElMessageBox.confirm('全量同步会从金蝶重新拉取全部研发领料单（研发测试、客供领料其他出库单），用于新增单据类型或补漏，耗时较长。继续？', '全量同步', { type: 'warning' })
+      await ElMessageBox.confirm('全量同步会忽略增量水位，从金蝶重新拉取起始日期（.env 的 K3_SYNC_START_DATE，默认今天往前 3 个月）之后的研发领料单（研发测试、客供领料其他出库单），用于新增单据类型或补漏，耗时较长。继续？', '全量同步', { type: 'warning' })
     } catch { return }
   }
   syncing.value = true

@@ -6,11 +6,14 @@
 - 金蝶里删掉的行，镜像里数量置 0（保留历史引用），由对账发现差额；
 - 已关账月份的单据在金蝶里被改，不改镜像，派待办给领料专员和管理员；
 - 增量：按金蝶"修改日期"，水位记在 job_run（k3_docs），下次从水位往前回退 10 分钟再拉，避免漏单；
+- 首次同步（还没有水位）和手动全量同步不拉全部历史，只拉起始日期之后修改过的单据：
+  K3_SYNC_START_DATE 固定日期优先，不填为今天往前 K3_SYNC_START_MONTHS 个月（默认 3 个月）；
 - 研发领料 = 其他出库单中单据类型为"研发测试其他出库单""客供领料其他出库单"的（K3_LL_BILL_TYPES），在 k3cloud.K3CloudReader.fetch_docs；
 - 退料 / 报废单不批量拉，领料专员分摊时按单号取（fetch_one）；A 转 B、调整单一期不接，手工录入 / Excel 导入。
 """
 from __future__ import annotations
 
+import calendar
 import json
 import logging
 from datetime import date, datetime, timedelta
@@ -30,6 +33,23 @@ log = logging.getLogger("rmlm.sync")
 
 JOB = "k3_docs"
 OVERLAP = timedelta(minutes=10)
+
+
+def _months_ago(d: date, months: int) -> date:
+    """d 往前 months 个月的同一天；目标月没有这一天时取月末（如 5-31 往前 3 个月 = 2-28 / 2-29）。"""
+    y, m0 = divmod(d.year * 12 + d.month - 1 - months, 12)
+    return date(y, m0 + 1, min(d.day, calendar.monthrange(y, m0 + 1)[1]))
+
+
+def start_since() -> datetime:
+    """首次 / 全量同步的起始时间（当天 0 点）：K3_SYNC_START_DATE 优先，否则今天往前 K3_SYNC_START_MONTHS 个月。"""
+    raw = settings.k3_sync_start_date
+    if raw:
+        try:
+            return datetime.combine(date.fromisoformat(raw), datetime.min.time())
+        except ValueError:
+            raise BizError(f"K3_SYNC_START_DATE 格式不对：{raw}，应为 YYYY-MM-DD，如 2026-08-26") from None
+    return datetime.combine(_months_ago(clock.today(), max(settings.k3_sync_start_months, 0)), datetime.min.time())
 
 
 def _job(db: Session) -> JobRun:
@@ -148,6 +168,9 @@ def sync_docs(db: Session, full: bool = False, reader=None) -> dict:
             since = datetime.fromisoformat(jr.last_key) - OVERLAP
         except ValueError:
             since = None
+    incremental = since is not None
+    if not incremental:
+        since = start_since()  # 首次 / 全量：只拉起始日期之后的单据，不拉全部历史
     own = reader is None
     reader = reader or make_reader()
     try:
@@ -162,8 +185,8 @@ def sync_docs(db: Session, full: bool = False, reader=None) -> dict:
         jr.last_key = max(marks).isoformat(timespec="seconds")
     elif not jr.last_key:
         jr.last_key = clock.now().isoformat(timespec="seconds")
-    stats["mode"] = "full" if since is None else "incremental"
-    stats["since"] = since.isoformat(sep=" ", timespec="seconds") if since else None
+    stats["mode"] = "incremental" if incremental else "full"
+    stats["since"] = since.isoformat(sep=" ", timespec="seconds")
     jr.last_run_at = clock.now()
     jr.last_result = json.dumps(stats, ensure_ascii=False)
     db.flush()

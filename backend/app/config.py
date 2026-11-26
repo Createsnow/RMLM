@@ -90,6 +90,11 @@ class Settings:
         # 分页查询失败（超时、断连、5xx）时的重试次数与间隔（秒）
         self.k3_page_retries: int = _int("K3_PAGE_RETRIES", 3)
         self.k3_page_retry_seconds: int = _int("K3_PAGE_RETRY_SECONDS", 10)
+        # 金蝶领料单首次同步（以及手动"全量同步"）的起始日期：只拉修改日期在此之后的单据。
+        # K3_SYNC_START_DATE 填固定日期（YYYY-MM-DD）优先；不填则按 K3_SYNC_START_MONTHS 取"今天往前 N 个月"（默认 3）。
+        # 首次同步之后按增量水位拉取，不再受此限制。
+        self.k3_sync_start_date: str = _env("K3_SYNC_START_DATE").strip()
+        self.k3_sync_start_months: int = _int("K3_SYNC_START_MONTHS", 3)
 
         # ---------- 企业微信自建应用。密钥只放 .env。
         self.wecom_corp_id: str = _env("WECOM_CORP_ID").strip()

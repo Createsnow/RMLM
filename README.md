@@ -101,6 +101,7 @@ RMLM_DATABASE_URL="mysql+pymysql://rmlm:密码@127.0.0.1:3306/rmlm_test?charset=
 | `K3_SERVER_URL` / `K3_ACCT_ID` / `K3_USERNAME` / `K3_APP_ID` / `K3_APP_SECRET` | 金蝶云星空 WebAPI（只读）。五项都填才启用物料同步 | 空 |
 | `K3_LCID` / `K3_USE_ORG` | 语言（2052 简体中文）/ 同步哪个组织的物料和单据（物料按使用组织，单据按库存组织） | 2052 / 100 |
 | `K3_LL_BILL_TYPES` | 研发领料在其他出库单里的单据类型（名称或编码，逗号分隔）；只自动拉这些类型 | 研发测试其他出库单,客供领料其他出库单 |
+| `K3_SYNC_START_DATE` / `K3_SYNC_START_MONTHS` | 领料单首次同步（及手动全量同步）的起始日期：只拉修改日期在此之后的单据；固定日期优先，不填为今天往前 N 个月。之后按水位每 15 分钟增量 | 空 / 3 |
 | `K3_LOGIN_TIMEOUT` / `K3_QUERY_TIMEOUT` / `K3_VIEW_TIMEOUT` | 金蝶登录 / 查询 / 查看单据超时（秒）；旧的 `K3_TIMEOUT` 仍可用，作查询超时默认值 | 30 / 120 / 60 |
 | `K3_PAGE_RETRIES` / `K3_PAGE_RETRY_SECONDS` | 金蝶分页查询失败（超时、断连、5xx）重试次数 / 间隔（秒） | 3 / 10 |
 | `WECOM_CORP_ID` / `WECOM_AGENT_ID` / `WECOM_SECRET` | 企业微信自建应用。三项都填才启用企微登录和推送 | 空 |
