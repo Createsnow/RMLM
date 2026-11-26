@@ -14,7 +14,8 @@ from ..db import get_db
 from ..errors import BizError, forbid, not_found
 from ..models import (AuditLog, Delegate, DictChange, DictItem, Freeze, LedgerLine, Location, Material, Photo, Project,
                       Todo, User)
-from ..perms import ROLES, ancestors, descendants, has_role, require_role, validate_delegate
+from ..perms import (ROLES, ancestors, can_view_line, descendants, has_role, require_role, validate_delegate,
+                     visible_user_ids)
 from ..security import current_user, hash_password, make_token, verify_password
 from ..services import erp as erpsvc
 from ..services import jobs, ledger, master_sync, wecom
@@ -34,10 +35,11 @@ class LoginIn(BaseModel):
 
 @router.post("/auth/login")
 def login(body: LoginIn, db: Session = Depends(get_db)):
+    # 业务确认（2026-11-26）：不做输错锁定
     u = db.scalar(select(User).where(User.username == body.username.strip()))
     if not u or not u.active or not verify_password(body.password, u.password_hash):
         raise BizError("账号或密码错误", 401)
-    return {"token": make_token(u), "user": user_out(u, db)}
+    return {"token": make_token(u, "pw"), "user": user_out(u, db)}
 
 
 # ------------------------------------------------------------------ 企业微信登录（网页授权）
@@ -60,16 +62,15 @@ class WecomLoginIn(BaseModel):
 @router.post("/auth/wecom")
 def wecom_login(body: WecomLoginIn, db: Session = Depends(get_db)):
     u = wecom.login_by_code(db, body.code.strip())
-    return {"token": make_token(u), "user": user_out(u, db)}
+    return {"token": make_token(u, "wx"), "user": user_out(u, db)}
 
 
 @router.get("/auth/me")
-def me(user: User = Depends(current_user), db: Session = Depends(get_db)):
+def me(request: Request, user: User = Depends(current_user), db: Session = Depends(get_db)):
     d = user_out(user, db)
     d["delegated_by"] = [p.name for p in db.scalars(
         select(User).join(Delegate, Delegate.principal_id == User.id).where(
             Delegate.agent_id == user.id, Delegate.start_at <= clock.now(), Delegate.end_at >= clock.now()))]
-    d["must_change_pw"] = user.must_change_pw
     return d
 
 
@@ -79,13 +80,17 @@ class PwIn(BaseModel):
 
 
 @router.post("/auth/password")
-def change_password(body: PwIn, user: User = Depends(current_user)):
+def change_password(request: Request, body: PwIn, user: User = Depends(current_user)):
     if not verify_password(body.old, user.password_hash):
         raise BizError("原密码不正确")
     if len(body.new) < 8:
         raise BizError("新密码至少 8 位")
+    if body.new == body.old:
+        raise BizError("新密码不能与原密码相同")
     user.password_hash, user.must_change_pw = hash_password(body.new), False
-    return {"ok": True}
+    user.token_version = (user.token_version or 0) + 1  # 其他设备上的旧登录凭证随即失效
+    # 本设备换发新凭证，免得刚改完密码就被踢出
+    return {"ok": True, "token": make_token(user, getattr(request.state, "login_method", None) or "pw")}
 
 
 # ------------------------------------------------------------------ 账号与组织（创建账号时勾选角色）
@@ -142,7 +147,7 @@ def create_user(body: UserIn, user: User = Depends(current_user), db: Session = 
     if db.scalar(select(User.id).where(User.username == body.username.strip())):
         raise BizError("账号已存在")
     u = User(username=body.username.strip(), password_hash=hash_password(body.password or "Rmlm@123456"),
-             must_change_pw=True)
+             must_change_pw=False)
     _apply_user(db, u, body)
     db.add(u)
     db.flush()
@@ -153,25 +158,39 @@ def create_user(body: UserIn, user: User = Depends(current_user), db: Session = 
 def update_user(uid: int, body: UserIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
     require_role(user, "ADMIN")
     u = get_or_404(db, User, uid, "账号")
+    old_manager = u.manager_id
     _apply_user(db, u, body)
+    if u.manager_id != old_manager:
+        # 直属上级变了：名下行待审的续期 / 改归还日改派给新上级（业务确认 2026-11-25）
+        from ..services.lineops import reassign_user_requests
+
+        db.flush()
+        reassign_user_requests(db, u)
     if body.password:
-        u.password_hash, u.must_change_pw = hash_password(body.password), True
+        u.password_hash, u.must_change_pw = hash_password(body.password), False  # 不强制改密码，本人可随时在“修改密码”里改
+        u.token_version = (u.token_version or 0) + 1  # 重置密码：此前发出的登录凭证全部失效
     if not body.active and u.active:
         _check_clearance(db, u)
     u.active = body.active
     return user_out(u, db)
 
 
-def _clearance(db: Session, u: User) -> list[dict]:
-    left = wecom.open_lines(db, u.id)
-    calcs = ledger.load(db, left)
-    return [{"id": l.id, "code": l.code, "balance": s(calcs[l.id].balance)} for l in left]
+def _clearance(db: Session, u: User) -> dict:
+    b = wecom.offboard_blockers(db, u.id)
+    calcs = ledger.load(db, b["lines"])
+    return {
+        "lines": [{"id": l.id, "code": l.code, "balance": s(calcs[l.id].balance)} for l in b["lines"]],
+        "transfers": [{"event_id": e.id, "code": db.get(LedgerLine, e.line_id).code,
+                       "from": db.get(User, e.holder_id).name} for e in b["transfers"]],
+        "reqs": [{"id": r.id, "no": r.no, "status": r.status} for r in b["reqs"]],
+        "text": wecom.blockers_text(b),
+    }
 
 
 def _check_clearance(db: Session, u: User) -> None:
-    left = _clearance(db, u)
-    if left:
-        raise BizError(f"{u.name} 名下还有 {len(left)} 行结存未清零，须先退库或转交后才能停用（离职 / 调岗卡点）")
+    c = _clearance(db, u)
+    if c["text"]:
+        raise BizError(f"{u.name} {c['text']}，处理完后才能停用（离职 / 调岗卡点）")
 
 
 @router.get("/users/{uid}/clearance")
@@ -180,8 +199,8 @@ def clearance(uid: int, user: User = Depends(current_user), db: Session = Depend
     u = get_or_404(db, User, uid, "账号")
     if not (has_role(user, "ADMIN", "DEPT_HEAD", "VP") or u.manager_id == user.id or u.id == user.id):
         raise forbid()
-    left = _clearance(db, u)
-    return {"user": u.name, "clear": not left, "lines": left}
+    c = _clearance(db, u)
+    return {"user": u.name, "clear": not c["text"], **c}
 
 
 @router.post("/users/{uid}/unfreeze")
@@ -218,7 +237,7 @@ def import_users(file: UploadFile = File(...), user: User = Depends(current_user
         if wx and db.scalar(select(User.id).where(User.wecom_userid == wx)):
             wx = None
         u = User(username=username, name=name, title=str(r[1] or ""), password_hash=hash_password("Rmlm@123456"),
-                 roles=",".join(sorted((roles & set(ROLES)) | {"USER"})), must_change_pw=True, wecom_userid=wx)
+                 roles=",".join(sorted((roles & set(ROLES)) | {"USER"})), must_change_pw=False, wecom_userid=wx)
         db.add(u)
         by_name[name] = u
         created += 1
@@ -493,7 +512,20 @@ async def upload_photo(file: UploadFile = File(...), user: User = Depends(curren
 @router.get("/photos/{pid}")
 def get_photo(pid: int, user: User = Depends(current_user), db: Session = Depends(get_db)):
     p = get_or_404(db, Photo, pid, "照片")
+    if not _can_view_photo(db, user, p):
+        raise forbid("无权查看该照片")
     return FileResponse(settings.photo_dir / p.path, media_type="image/jpeg")
+
+
+def _can_view_photo(db: Session, user: User, p: Photo) -> bool:
+    """上传人本人、全局可见角色，或能看到引用这张照片的领用行的人。"""
+    if p.uploader_id == user.id or visible_user_ids(db, user) is None:
+        return True
+    from ..models import Event
+
+    # JSON_CONTAINS(照片列表, '5')：MySQL 8 与 MariaDB 都支持，候选值以 JSON 文本传入
+    line_ids = set(db.scalars(select(Event.line_id).where(func.json_contains(Event.photos, str(p.id)) == 1)))
+    return any(can_view_line(db, user, l) for l in db.scalars(select(LedgerLine).where(LedgerLine.id.in_(line_ids or {0}))))
 
 
 # ------------------------------------------------------------------ 审计与任务

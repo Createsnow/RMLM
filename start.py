@@ -55,11 +55,30 @@ def same(a: Path, b: Path) -> bool:
 
 
 # ---------------------------------------------------------------- 配置
+def ensure_jwt_secret(env_file: Path) -> None:
+    """本地 .env 的登录令牌密钥为空或仍是示例值时，自动生成随机密钥写回（服务端会拒绝弱密钥启动）。"""
+    import secrets
+
+    lines = env_file.read_text(encoding="utf-8").splitlines()
+    weak = {"", "dev-secret-change-me", "changeme", "change-me", "secret"}
+    for i, raw in enumerate(lines):
+        if raw.strip().startswith("RMLM_JWT_SECRET="):
+            value = raw.split("=", 1)[1].strip().strip("\"'")
+            if value in weak or value.startswith("请") or len(value) < 16:
+                lines[i] = f"RMLM_JWT_SECRET={secrets.token_urlsafe(32)}"
+                env_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+                say("已为本地 .env 生成随机的 RMLM_JWT_SECRET")
+            return
+    env_file.write_text("\n".join(lines + [f"RMLM_JWT_SECRET={secrets.token_urlsafe(32)}"]) + "\n", encoding="utf-8")
+    say("已为本地 .env 生成随机的 RMLM_JWT_SECRET")
+
+
 def load_env() -> dict:
     env_file = ROOT / ".env"
     if not env_file.exists():
         shutil.copyfile(ROOT / ".env.example", env_file)
         say(f"已生成 .env（默认连接本机 MySQL 的 rmlm 库），数据库与金蝶连接请编辑 {env_file}")
+    ensure_jwt_secret(env_file)
     env = os.environ.copy()
     for raw in env_file.read_text(encoding="utf-8").splitlines():
         line = raw.strip()

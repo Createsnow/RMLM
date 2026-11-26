@@ -5,6 +5,7 @@
       <span class="t">{{ $route.meta.title }}</span>
       <span class="grow" />
       <el-tag v-if="store.user?.frozen" type="danger" size="small">已冻结</el-tag>
+      <span v-if="$route.path !== '/m/password'" class="pw" @click="$router.push('/m/password')"><el-icon><Lock /></el-icon>改密码</span>
     </div>
     <div class="m-body"><router-view :key="$route.fullPath" /></div>
     <div class="m-tab">
@@ -48,6 +49,7 @@ onMounted(async () => {
 .m-top .t { font-weight: 700; font-size: 16px; }
 .back { font-size: 20px; cursor: pointer; }
 .grow { flex: 1; }
+.pw { display: inline-flex; align-items: center; gap: 3px; font-size: 13px; color: var(--brand); cursor: pointer; }
 .m-body { padding: 12px; }
 .m-tab { position: fixed; bottom: 0; left: 0; right: 0; height: 58px; background: #fff; border-top: 1px solid var(--line);
   display: grid; grid-template-columns: repeat(5, 1fr); z-index: 10; padding-bottom: env(safe-area-inset-bottom); }

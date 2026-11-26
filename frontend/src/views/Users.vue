@@ -27,7 +27,7 @@
         </template></el-table-column>
       </el-table>
     </div>
-    <div class="muted">批量导入列：序号 | 岗位 | 姓名 | 直属上级（姓名，顶层填 /）| 账号 | 角色（代码逗号分隔，可空）| 企微 UserID（可空）。初始密码 Rmlm@123456，首次登录强制修改。</div>
+    <div class="muted">批量导入列：序号 | 岗位 | 姓名 | 直属上级（姓名，顶层填 /）| 账号 | 角色（代码逗号分隔，可空）| 企微 UserID（可空）。初始密码 Rmlm@123456，请提醒本人登录后在“修改密码”里自行修改（系统不强制）。</div>
     <div class="muted">{{ wx.configured ? `企微通讯录每天自动同步人员、岗位、直属上级和离职；角色仍在此勾选。${wx.last_run_at ? '最近同步 ' + wx.last_run_at : '尚未同步'}` : '未配置企业微信：用账号密码登录，消息只在站内待办。' }}</div>
     <el-dialog v-model="dlg" :title="f.id ? '编辑账号' : '新建账号'" width="520px">
       <el-form label-width="90px">
@@ -87,7 +87,8 @@ async function save() {
 }
 async function clearance() {
   const r = await api.get(`/api/users/${f.id}/clearance`)
-  ElMessageBox.alert(r.clear ? '名下无结存，可以办理离职 / 调岗。' : `名下还有 ${r.lines.length} 行未清零：${r.lines.map(l => l.code + '（' + l.balance + '）').join('、')}`, '离职检查')
+  const detail = [r.text, r.lines.length ? '未清零的行：' + r.lines.map(l => l.code + '（' + l.balance + '）').join('、') : ''].filter(Boolean).join('。')
+  ElMessageBox.alert(r.clear ? '名下无结存、无待确认转交、无未开完单的申请，可以办理离职 / 调岗。' : detail, '离职检查')
 }
 async function doImport({ file }) { const r = await api.upload('/api/users/import', file); ElMessage.success(`新建 ${r.created} 个账号，初始密码 ${r.initial_password}`); load() }
 async function syncContacts() {

@@ -33,19 +33,33 @@ def _database_url() -> str:
     return url.render_as_string(hide_password=False)
 
 
+# 示例文件里出现过的占位值：照抄这些上线等于没设密钥，任何人都能伪造登录凭证
+WEAK_JWT_SECRETS = {"dev-secret-change-me", "请改成一串随机字符", "changeme", "change-me", "secret"}
+
+
+def check_jwt_secret(secret: str) -> None:
+    """启动时校验登录凭证签名密钥：不能为空、不能是示例占位值、至少 16 位。不合格直接拒绝启动。"""
+    s = (secret or "").strip()
+    if not s or s in WEAK_JWT_SECRETS or s.startswith("请") or len(s) < 16:
+        raise RuntimeError("RMLM_JWT_SECRET 未设置、仍是示例值或少于 16 位：请在 .env 里改成一串随机字符"
+                           "（如 python -c \"import secrets;print(secrets.token_urlsafe(32))\"）后再启动")
+
+
 class Settings:
     def __init__(self) -> None:
         # ---------- 数据库（MySQL 8）
         self.database_url: str = _database_url()
 
         # ---------- 安全与登录
-        self.jwt_secret: str = _env("RMLM_JWT_SECRET", "dev-secret-change-me")
+        self.jwt_secret: str = _env("RMLM_JWT_SECRET")  # 启动时由 check_jwt_secret 校验
         self.jwt_hours: int = _int("RMLM_JWT_HOURS", 12)
+        # 开单数量允许超出申请数量的比例（%）：0 = 不允许超出（默认）；如光缆裁长常略多于申请，可设 5 / 10
+        self.over_issue_pct: int = _int("RMLM_OVER_ISSUE_PCT", 0)
 
         # ---------- 照片 / 静态文件
         self.photo_dir: Path = Path(_env("RMLM_PHOTO_DIR", "./data/photos")).resolve()
         self.photo_max_kb: int = _int("RMLM_PHOTO_MAX_KB", 300)
-        self.watermark_font: str = _env("RMLM_WATERMARK_FONT", "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc")
+        self.watermark_font: str = _env("RMLM_WATERMARK_FONT").strip()  # 空 = 按 photos.FONT_CANDIDATES 自动找中文字体
         self.static_dir: Path = Path(
             _env("RMLM_STATIC_DIR", str(Path(__file__).resolve().parents[2] / "frontend" / "dist"))
         )
@@ -76,6 +90,11 @@ class Settings:
         # 分页查询失败（超时、断连、5xx）时的重试次数与间隔（秒）
         self.k3_page_retries: int = _int("K3_PAGE_RETRIES", 3)
         self.k3_page_retry_seconds: int = _int("K3_PAGE_RETRY_SECONDS", 10)
+        # 金蝶领料单首次同步（以及手动"全量同步"）的起始日期：只拉修改日期在此之后的单据。
+        # K3_SYNC_START_DATE 填固定日期（YYYY-MM-DD）优先；不填则按 K3_SYNC_START_MONTHS 取"今天往前 N 个月"（默认 3）。
+        # 首次同步之后按增量水位拉取，不再受此限制。
+        self.k3_sync_start_date: str = _env("K3_SYNC_START_DATE").strip()
+        self.k3_sync_start_months: int = _int("K3_SYNC_START_MONTHS", 3)
 
         # ---------- 企业微信自建应用。密钥只放 .env。
         self.wecom_corp_id: str = _env("WECOM_CORP_ID").strip()

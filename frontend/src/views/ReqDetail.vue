@@ -41,7 +41,7 @@
       <el-button type="primary" @click="decide(true)">同意</el-button>
       <el-button type="danger" plain @click="decide(false)">驳回</el-button>
     </div>
-    <el-button v-if="r.can_cancel" @click="cancel">撤回申请</el-button>
+    <el-button v-if="r.can_cancel" @click="cancel">{{ r.status === 'APPROVED' ? '撤回未开单部分' : '撤回申请' }}</el-button>
   </div>
 </template>
 

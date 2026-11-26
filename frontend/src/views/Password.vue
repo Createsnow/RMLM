@@ -1,6 +1,7 @@
 <template>
   <div class="card" style="max-width: 420px">
     <h3>修改密码</h3>
+    <p class="muted" style="margin: 0 0 12px">改密码后，其他设备上的登录会失效，需要重新登录。通过企业微信自动开通的账号不知道原密码，需要电脑端登录时请联系管理员重置密码。</p>
     <el-form label-position="top">
       <el-form-item label="原密码"><el-input v-model="f.old" type="password" show-password /></el-form-item>
       <el-form-item label="新密码（至少 8 位）"><el-input v-model="f.new" type="password" show-password /></el-form-item>
@@ -16,15 +17,17 @@ import { reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { api } from '../api'
-import { logout } from '../store'
+import { logout, setLogin, store } from '../store'
 
 const router = useRouter()
 const f = reactive({ old: '', new: '' })
 const again = ref('')
 async function save() {
   if (f.new !== again.value) return ElMessage.error('两次输入不一致')
-  await api.post('/api/auth/password', f)
+  const r = await api.post('/api/auth/password', f)
+  // 改密码后其他设备上的旧登录凭证失效，本设备换用新凭证
+  if (r.token) setLogin(r.token, { ...store.user, must_change_pw: false })
   ElMessage.success('已修改')
-  router.back()
+  router.replace(location.pathname.startsWith('/m') ? '/m' : '/')
 }
 </script>
