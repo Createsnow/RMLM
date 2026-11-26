@@ -9,7 +9,7 @@ const v = name => views[`./views/${name}.vue`]
 
 const shared = [
   { path: 'todos', component: v('Todos'), meta: { title: '我的待办' } },
-  { path: 'apply', component: v('ReqForm'), meta: { title: '领料申请' } },
+  { path: 'apply', component: v('ReqForm'), meta: { title: '新建申请' } },
   { path: 'reqs', component: v('ReqList'), meta: { title: '领料申请' } },
   { path: 'req/:id', component: v('ReqDetail'), meta: { title: '申请详情' } },
   { path: 'approve', component: v('Approvals'), meta: { title: '待我审核' } },

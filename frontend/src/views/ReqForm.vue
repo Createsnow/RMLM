@@ -69,6 +69,7 @@ import { api } from '../api'
 import { store } from '../store'
 import { dictOptions, today } from '../utils'
 import RemoteSelect from '../components/RemoteSelect.vue'
+import { closeTab } from '../tabs'
 
 const route = useRoute()
 const router = useRouter()
@@ -85,6 +86,7 @@ async function submit() {
     if (!body.long_cycle) body.long_cycle_months = null
     const r = await api.post('/api/requisitions', body)
     ElMessage.success(`已提交 ${r.no}，审核人：${r.approver}`)
+    closeTab('/apply', '') // 电脑版：提交后关掉「新建申请」页签，下次打开是空白表单
     router.push(`${mobile.value ? '/m' : ''}/req/${r.id}`)
   } finally { saving.value = false }
 }

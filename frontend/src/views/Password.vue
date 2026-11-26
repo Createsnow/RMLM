@@ -18,6 +18,7 @@ import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { api } from '../api'
 import { logout, setLogin, store } from '../store'
+import { closeTab } from '../tabs'
 
 const router = useRouter()
 const f = reactive({ old: '', new: '' })
@@ -28,6 +29,7 @@ async function save() {
   // 改密码后其他设备上的旧登录凭证失效，本设备换用新凭证
   if (r.token) setLogin(r.token, { ...store.user, must_change_pw: false })
   ElMessage.success('已修改')
+  closeTab('/password', '')
   router.replace(location.pathname.startsWith('/m') ? '/m' : '/')
 }
 </script>
