@@ -1,5 +1,8 @@
 import json
 import logging
+import os
+import threading
+import time
 from contextlib import asynccontextmanager
 
 import jwt
@@ -11,7 +14,7 @@ from sqlalchemy.schema import CreateColumn
 
 from . import db as dbmod
 from .api import biz, core
-from .config import settings
+from .config import check_jwt_secret, settings
 from .dicts import SEED
 from .models import AuditLog, DictItem, User
 from .security import hash_password
@@ -68,12 +71,34 @@ def init_db() -> None:
                     db.add(DictItem(dict_type=dtype, code=code, name=name, meaning=meaning or None, sort=i))
         if not db.scalar(select(User.id).limit(1)):
             db.add(User(username=settings.admin_username, name="系统管理员", roles="ADMIN,USER",
-                        password_hash=hash_password(settings.admin_password), must_change_pw=True))
+                        password_hash=hash_password(settings.admin_password), must_change_pw=False))
         db.commit()
+
+
+EXIT_GRACE_SECONDS = 5
+_watchdog: threading.Thread | None = None
+
+
+def arm_exit_watchdog(grace: float = EXIT_GRACE_SECONDS) -> None:
+    """服务停止后兜底：主线程结束时若还有请求线程没跑完（例如停服务时正在手动同步金蝶，
+    请求已被 uvicorn 取消但线程还在跑），Python 会一直等它，进程关不掉。
+    这里最多再等 grace 秒就直接结束进程；没提交的事务由 MySQL 回滚。"""
+    def watch() -> None:
+        threading.main_thread().join()
+        time.sleep(grace)
+        log.warning("仍有后台任务未结束，已强制退出")
+        logging.shutdown()
+        os._exit(0)
+
+    global _watchdog
+    if _watchdog is None:  # 测试里每个用例都会走一遍 lifespan，只需一个
+        _watchdog = threading.Thread(target=watch, name="rmlm-exit-watchdog", daemon=True)
+        _watchdog.start()
 
 
 @asynccontextmanager
 async def lifespan(_app):
+    check_jwt_secret(settings.jwt_secret)
     init_db()
     if settings.wecom_enabled:
         from .services.wecom import install_push_hook
@@ -84,6 +109,12 @@ async def lifespan(_app):
 
         start()
     yield
+    if settings.enable_scheduler:
+        from .scheduler import stop
+
+        stop()
+    dbmod.engine.dispose()
+    arm_exit_watchdog()
 
 
 app = FastAPI(title="研发物料管家 RMLM", version="1.0.0", lifespan=lifespan)

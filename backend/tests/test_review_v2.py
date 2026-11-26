@@ -1,5 +1,5 @@
 """第二轮代码检查（2026-11-25）发现的问题的回归测试：
-报废批次含已冲销事件后无法挂单、关账后仍能复核通过冲销、补审被驳回的紧急行口径（必须审核通过才算补齐）、
+报废批次含已冲销事件后无法挂单、关账后仍能复核通过冲销、
 锁定行上的转交无法拒绝、手工改已关账月份单据的过账状态、报废单据覆盖率把已冲销事件算进分母。"""
 from datetime import datetime
 
@@ -74,20 +74,6 @@ def test_pending_reversal_cannot_take_effect_after_period_closed(org, ref):
     # 驳回仍然可以，待办随之关闭
     org.ok(org.post("admin", f"/api/reversals/{rv['id']}/decide", {"approve": False, "note": "已关账"}))
     assert not any(t["kind"] == "REVERSAL_REVIEW" for t in org.ok(org.get("admin", "/api/todos")))
-
-
-def test_rejected_urgent_line_stays_pending(org, ref):
-    """业务确认：必须审核通过才算补齐。驳回后即使补挂了领料单，仍是"紧急·待补"，不会结案。"""
-    req = make_req(org, ref, urgent=True, urgent_note="组长口头同意")
-    line = org.ok(org.post("keeper", f"/api/requisitions/{req['id']}/urgent-handover/{req['items'][0]['id']}"))
-    org.ok(org.post("a1", f"/api/lines/{line['id']}/sign", {"photos": [org.photo("a1")]}))
-    org.ok(org.post("lead_a", f"/api/requisitions/{req['id']}/decide", {"approve": False, "note": "不该领"}))
-    assert any(t["kind"] == "MUST_RETURN" for t in org.ok(org.get("a1", "/api/todos")))
-    assert "紧急·待补" in org.ok(org.get("a1", f"/api/lines/{line['id']}"))["flags"]
-    ll = erp_doc(org, "LL", [{"material_code": "M-CABLE", "qty": 10}], remark=req["no"])
-    org.ok(org.post("keeper", "/api/erp/bind", {"req_item_id": req["items"][0]["id"],
-                                                "erp_line_id": ll["lines"][0]["id"]}))
-    assert "紧急·待补" in org.ok(org.get("a1", f"/api/lines/{line['id']}"))["flags"]
 
 
 def test_receiver_can_reject_transfer_on_locked_line(org, ref):

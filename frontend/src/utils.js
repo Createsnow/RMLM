@@ -30,7 +30,8 @@ export const TODO_KINDS = {
   RETURN_DOC: '退料开单', URGENT_PENDING: '紧急待补', MUST_RETURN: '须全额退库', OVERDUE: '超期处理', UNFREEZE: '解冻',
   RECON_CLAIM: '认领差异', RECON_RESOLVE: '关闭差异', ERP_UNBOUND: '补登', REVERSAL_REVIEW: '冲销复核', LOCKED_LINE: '锁行修正', RENEW_REMIND: '续期提醒',
   PROJECT_CLOSED: '结项清零', CLOSE_REMIND: '关账', DICT_APPROVE: '字典变更', NOTICE: '通知',
-  LAB_CONCLUSION: '回填实验结论', TRANSFER_ASSIGN: '外部受让认领'
+  LAB_CONCLUSION: '回填实验结论', TRANSFER_ASSIGN: '外部受让认领', SYNC_FAIL: '同步失败', JOB_FAIL: '定时任务出错',
+  ERP_UNPOSTED: '单据反审核'
 }
 
 export function todoLink(t, mobile = false) {
