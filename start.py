@@ -152,7 +152,10 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="研发物料管家本地一键启动")
     parser.add_argument("mode", nargs="?", default="start", choices=["start", "rebuild"],
                         help="start：一键启动（默认）；rebuild：重新构建前端后启动")
+    parser.add_argument("--rebuild", action="store_true", help="同 rebuild")
     args = parser.parse_args()
+    if args.rebuild:
+        args.mode = "rebuild"
 
     if sys.version_info < (3, 11):
         fail(f"Python 版本过低（{sys.version.split()[0]}），需要 3.11 及以上")
