@@ -11,14 +11,14 @@
 - 旧台账：一次导入为只读**历史台账**（基础数据 → 历史台账；业务蓝图称"历史基线"），只用于查询与总量核对，不进台账、不参与对账与考核
 - 双轨并行期：对账与报表 → 统计报表 → 双轨抽查，每周抽 20 单与旧表比对，连续两周一致率 ≥ 95% 可进入收口
 
-设计说明与已确认的业务规则见 [docs/系统方案.md](docs/系统方案.md)，功能模块划分与界面用语见 [docs/术语表.md](docs/术语表.md)，总体架构图见 [docs/RMLM 总体架构.html](docs/RMLM%20总体架构.html)。
+设计说明与已确认的业务规则见 [docs/系统方案.md](docs/系统方案.md)，功能模块划分与界面用语见 [docs/术语表.md](docs/术语表.md)，总体架构图见 [docs/RMLM 总体架构.html](docs/RMLM%20总体架构.html)；不用 Docker 的服务器部署与日常运维（启停、定时任务、外部接口、监控巡检、备份恢复、升级回退、故障处理）见 [docs/运维手册.md](docs/运维手册.md)。
 
 ## 目录
 
 ```
 backend/            FastAPI 应用（app/）、测试（tests/）、演示数据脚本（scripts/demo_seed.py）
 frontend/           Vue 3 前端；Dockerfile + nginx.conf（web 镜像）
-docs/               系统方案、术语表、仓储接口规范、总体架构图
+docs/               系统方案、术语表、仓储接口规范、总体架构图、运维手册
 deploy/backup.sh    Docker 部署的每日备份脚本
 Dockerfile          api 镜像
 docker-compose.yml  api + web（+ 可选随附 MySQL）
@@ -45,7 +45,7 @@ docker compose up -d --build
 - `RMLM_JWT_SECRET`（至少 16 位随机字符）、`RMLM_ADMIN_PASSWORD`。
 - 金蝶 `K3_*`、企微 `WECOM_*`、`RMLM_PUBLIC_URL`、仓储 `WMS_*` 按需填写。
 
-访问 `http://服务器:8000`（端口改 `.env` 的 `WEB_PORT`），用 `.env` 里的管理员账号登录，登录后请在右上角“修改密码”里改掉初始密码（系统不强制改密码）。生产环境请在前面加一层 HTTPS 反向代理（手机摄像头扫码、企微网页授权都需要 HTTPS）。
+访问 `http://服务器:8000`（端口改 `.env` 的 `WEB_PORT`），用 `.env` 里的管理员账号登录，登录后请在左侧栏左下角的当前账号菜单里点“修改密码”，改掉初始密码（系统不强制改密码）。生产环境请在前面加一层 HTTPS 反向代理（手机摄像头扫码、企微网页授权都需要 HTTPS）。
 
 常用命令（都在仓库根目录执行）：
 
