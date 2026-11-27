@@ -1,7 +1,7 @@
 """数据模型。
 
 原则：
-- 事件表 event 只增不改（除"待审"类事件的审批结果字段），结存与状态全部由事件推导；
+- 事件表 event 只增不改（除"待审"类事件的审核结果字段），结存与状态全部由事件推导；
 - 金蝶只读：erp_doc / erp_line 是从金蝶读取（或手工录入、Excel 导入）的单据镜像，中台不回写金蝶。
 """
 from datetime import date, datetime
@@ -46,8 +46,13 @@ class User(Base):
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     frozen: Mapped[bool] = mapped_column(Boolean, default=False)
     password_hash: Mapped[str] = mapped_column(String(128))
-    must_change_pw: Mapped[bool] = mapped_column(Boolean, default=True)
+    must_change_pw: Mapped[bool] = mapped_column(Boolean, default=False)  # 已不使用：业务确认不强制改密码（保留列，兼容已有数据）
     wecom_userid: Mapped[str | None] = mapped_column(String(64))  # 企业微信 UserID，用于免密登录、通讯录同步、消息推送
+    # failed_logins / locked_until：原密码输错锁定用，业务确认（2026-11-26）取消锁定后不再使用，保留列兼容已有数据
+    failed_logins: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime)
+    # 改密码 / 重置密码时 token_version + 1，旧登录凭证随即失效
+    token_version: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
 
     manager: Mapped["User | None"] = relationship(remote_side=[id])
@@ -436,6 +441,15 @@ class JobRun(Base):
     last_run_at: Mapped[datetime | None] = mapped_column(DateTime)
     last_key: Mapped[str | None] = mapped_column(String(32))  # 已执行过的周期标识（周/季/月），或同步任务的增量水位
     last_result: Mapped[str | None] = mapped_column(Text)  # 最近一次执行结果（同步任务用，JSON 文本）
+
+
+class SysSetting(Base):
+    """网页上可改的系统设置（键值）。目前只有金蝶领料单自动同步的开关与间隔；新表，启动时自动建，不改已有表。"""
+    __tablename__ = "sys_setting"
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[str] = mapped_column(Text)
+    updated_by: Mapped[int | None] = mapped_column(Integer)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, default=_now, onupdate=_now)
 
 
 # ---------------------------------------------------------------- 历史基线与双轨抽查（v1.1）

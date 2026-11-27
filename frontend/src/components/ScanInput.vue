@@ -17,7 +17,7 @@
 </template>
 
 <script setup>
-import { onMounted, onUnmounted, ref } from 'vue'
+import { onDeactivated, onMounted, onUnmounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 
 const props = defineProps({ placeholder: { type: String, default: '扫描或输入仓储码 / 单据号' } })
@@ -67,6 +67,8 @@ function stop() {
 
 onMounted(() => inp.value?.focus())
 onUnmounted(stop)
+// 电脑版切到别的页签时页面被缓存而不卸载，也要关掉摄像头
+onDeactivated(stop)
 </script>
 
 <style scoped>

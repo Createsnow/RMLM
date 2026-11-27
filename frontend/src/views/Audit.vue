@@ -16,9 +16,10 @@
 </template>
 
 <script setup>
-import { onMounted, ref } from 'vue'
+import { ref } from 'vue'
 import { api } from '../api'
+import { useRefresh } from '../useRefresh'
 
 const rows = ref([])
-onMounted(async () => { rows.value = await api.get('/api/audit?limit=500') })
+useRefresh(async () => { rows.value = await api.get('/api/audit?limit=500') })
 </script>

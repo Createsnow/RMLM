@@ -1,0 +1,199 @@
+<title>一期业务主流程</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* VOICE work：给业务、IT 看的技术流程图，与《RMLM 总体架构》同一套视觉
+   IDEA 泳道图：人与系统分组，从提需求到月度关账一条链
+   PICTURE 七条泳道的主流程图，绿色节点为“不接仓储”后与 v1.2 不同的步骤
+   COLOUR 白底、深墨、蓝（中台）、橙（金蝶）、绿（一期变化）
+   TYPE 系统中文字体
+   LAYOUT 标题 + 一句结论 → 全宽泳道图 → 两栏：可以先不做 / 仍要做；手机上单栏，图横向滚动 */
+:root{
+  --bg:#f5f7fa; --surface:#ffffff; --fg:#16202c; --muted:#5a6676; --line:#cdd5df;
+  --lane:#eceff4; --accent:#1d5fbf; --accent-soft:#e4edfb; --erp:#a8620a; --erp-soft:#fbefdc;
+  --new:#0f7a6c; --new-soft:#e2f4f0;
+  --f-body:"PingFang SC","Microsoft YaHei","Noto Sans SC","Hiragino Sans GB",system-ui,sans-serif;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#10151b; --surface:#1a2129; --fg:#e5eaf0; --muted:#98a4b2; --line:#36414e;
+  --lane:#151b22; --accent:#73a6f2; --accent-soft:#1b2a3f; --erp:#e3a550; --erp-soft:#322717;
+  --new:#4fc7b4; --new-soft:#15302c; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#10151b; --surface:#1a2129; --fg:#e5eaf0; --muted:#98a4b2; --line:#36414e;
+  --lane:#151b22; --accent:#73a6f2; --accent-soft:#1b2a3f; --erp:#e3a550; --erp-soft:#322717;
+  --new:#4fc7b4; --new-soft:#15302c; color-scheme:dark}
+*{box-sizing:border-box;min-width:0}
+body{background:var(--bg);color:var(--fg);font:16px/1.65 var(--f-body);overflow-x:clip;margin:0}
+.wrap{max-width:1240px;margin:0 auto;padding-block:32px 56px;
+  padding-left:max(5vw,16px,env(safe-area-inset-left,0px));padding-right:max(5vw,16px,env(safe-area-inset-right,0px));
+  display:grid;gap:32px}
+header{display:grid;gap:8px}
+h1{font-size:clamp(26px,3.4vw,36px);line-height:1.15;margin:0;letter-spacing:-.01em}
+h2{font-size:19px;margin:0 0 6px}
+h3{font-size:16px;margin:0 0 4px}
+.lead{color:var(--muted);margin:0;max-width:78ch}
+.lead b{color:var(--fg)}
+section{display:grid;gap:10px}
+.scroll{overflow-x:auto;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px}
+.scroll svg{display:block;width:100%;height:auto;min-width:1040px}
+.cap{color:var(--muted);font-size:14px;margin:0;max-width:90ch}
+.legend{display:flex;flex-wrap:wrap;gap:8px 20px;font-size:13px;color:var(--muted)}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.sw{width:14px;height:14px;border-radius:3px;border:1.4px solid}
+.cols{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(0,1fr);gap:24px;align-items:start}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:18px 20px}
+table{border-collapse:collapse;width:100%;font-size:14px}
+th,td{text-align:left;vertical-align:top;padding:8px 8px;border-top:1px solid var(--line)}
+th{color:var(--muted);font-weight:600;border-top:none}
+td:first-child{font-weight:600;width:34%}
+ol{margin:0;padding-left:1.3em;display:grid;gap:10px;font-size:15px}
+ol b{display:block}
+.note{font-size:13px;color:var(--muted)}
+code{font-size:13px;overflow-wrap:anywhere}
+svg text{font-family:var(--f-body);fill:var(--fg)}
+.c{font-size:11px;fill:var(--muted)}
+.ln{stroke:var(--muted);stroke-width:1.4;fill:none}
+.dash{stroke-dasharray:5 4}
+.ah{fill:var(--muted)}
+.lane0{fill:var(--lane)} .lane1{fill:var(--bg)}
+.lanes0,.lanes1{fill:var(--accent-soft);fill-opacity:.5} .lanes1{fill-opacity:.3}
+.lanesep{stroke:var(--line);stroke-width:1} .lanesep2{stroke:var(--accent);stroke-width:1.6}
+.lanet{font-size:12.5px;font-weight:700} .lanetsys{fill:var(--accent)}
+.lanesub{font-size:10.5px;fill:var(--muted)}
+.n-act{fill:var(--surface);stroke:var(--line);stroke-width:1.2}
+.n-new{fill:var(--new-soft);stroke:var(--new);stroke-width:1.5}
+.n-sys{fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.3}
+.n-erp{fill:var(--erp-soft);stroke:var(--erp);stroke-width:1.3}
+.n-wx{fill:var(--surface);stroke:var(--accent);stroke-width:1.2;stroke-dasharray:4 3}
+.nt{font-size:12.5px;font-weight:700} .ns{font-size:10.5px;fill:var(--muted)} .nw{font-size:10px;font-weight:700;fill:var(--accent)}
+@media(max-width:820px){.cols{grid-template-columns:minmax(0,1fr)}}
+@media(max-width:600px){
+  table{font-size:13px} th,td{padding:6px 4px}
+  .stack thead{display:none} .stack tr{display:grid;padding-block:8px;border-top:1px solid var(--line)}
+  .stack td{border:none;padding:2px 0;width:auto} .stack td::before{content:attr(data-l);display:block;font-size:12px;color:var(--muted);font-weight:400}
+}
+</style>
+
+<div class="wrap">
+<header>
+  <h1>一期业务主流程（不对接仓储）</h1>
+  <p class="lead"><b>一期不接仓储，物料码改由本系统发“行码”（RM 开头），流程照常跑通。</b>领料单过账后系统生成领用行并直接发行码；使用人选单号或扫行码签收，签收后打印行码标签贴在实物上；拆分时本系统发新码并打印标签。代码已支持这种模式，只要不配置仓储接口（<code>WMS_BASE_URL</code> / <code>WMS_TOKEN</code>）即可，基于 <code>rmlm-v1</code> 分支 82d642e。</p>
+</header>
+
+<section>
+  <div class="scroll"><svg id="flow" role="img" aria-label="一期业务主流程泳道图：人员四条泳道、系统三条泳道（企业微信、RMLM 中台、金蝶 ERP），不含仓储系统"></svg></div>
+  <div class="legend">
+    <span><i class="sw" style="background:var(--surface);border-color:var(--line)"></i>人工步骤（蓝字为操作所在系统）</span>
+    <span><i class="sw" style="background:var(--accent-soft);border-color:var(--accent)"></i>RMLM 中台自动</span>
+    <span><i class="sw" style="background:var(--erp-soft);border-color:var(--erp)"></i>金蝶</span>
+    <span><i class="sw" style="background:var(--new-soft);border-color:var(--new)"></i>不接仓储后与 v1.2 不同的步骤</span>
+    <span>虚线：系统自动取数</span>
+  </div>
+  <p class="cap">与 v1.2 总体架构相比，去掉了“仓储系统”泳道（入库赋码、实物出库、签收时查码、拆分申请新码）。实物仍由仓库按金蝶领料单发出、按退料单收回，只是中台不再和仓储系统交换条码。签收仍须使用人本人、必须拍照；一人领整单时可整单签收（不再扫码）。紧急领用（先交接、24 小时内补审核和 ERP 单）、转交、外出、冲销等其余规则不变，图中只画主路径。</p>
+</section>
+
+<section class="cols">
+  <div class="panel">
+    <h2>不接仓储，可以先不做的</h2>
+    <p class="note">都已写好，不配置仓储接口时自动关闭，不用改代码；下面是一期不用投入的工作和不会出现的功能。</p>
+    <table class="stack">
+      <thead><tr><th>功能</th><th>一期怎么处理</th></tr></thead>
+      <tbody id="skip"></tbody>
+    </table>
+  </div>
+  <div class="panel">
+    <h2>不接仓储后，仍要做或要定的</h2>
+    <ol>
+      <li><b>行码标签打印</b>配 50×30mm 标签打印机。签收后在行详情点“标签”打印、贴在实物上；拆分完成后系统自动跳到打印页。要定由谁打、在哪里打：使用人自己打，还是领料专员交接时打好。</li>
+      <li><b>拆分是否一期开放</b>蓝图 5.1 写“仓储条码上线后切到物料码，拆分与扣料随之打开”，字面上一期不开拆分。代码目前一期也能拆分（发 RM 新码并打标签），请业务定：一期开放，还是先隐藏拆分。</li>
+      <li><b>“临时码”字样改为“行码”</b>行详情页显示“本系统临时码（未接仓储）”，代码注释和文档写“仅供开发、测试、演示”。一期要正式使用，须改成“一期行码”。只改文字，不改逻辑。</li>
+      <li><b>码绑定率口径</b>按蓝图“条码上线前以行码计”，每条签收的行都有行码，一期这一项基本恒为 100%，只能说明行码都已生成，不能说明标签真的贴了。如需考核贴标，要另加“已打印标签”记录。</li>
+      <li><b>以后接仓储怎么切</b>配上仓储接口后，新生成的行走仓储码。切换前已签收的行继续用 RM 行码到结案，拆分也仍由本系统发码。切换时还没签收的行，签收时须扫仓储码。不做历史码替换。</li>
+    </ol>
+  </div>
+</section>
+</div>
+
+<script>
+{
+  const SKIP=[
+    ["仓储两个接口的开发与联调","查询条码、拆分申请新码都不用仓储侧实现；《仓储接口规范》评审、网络打通、联调都推到二期，遗留的“拆分幂等键”问题也随之不用谈"],
+    ["签收扫仓储条码核对","不再核对已出库、物料一致、出库单号一致、未被占用、数量合计；签收 = 选单号或扫行码 + 本人 + 拍照"],
+    ["一个单据行多个条码拆成多条领用行","一个金蝶单据行就是一条领用行，数量 = 单据行数量"],
+    ["整单签收时按物料 / 出库行号分配条码","整单批量签收保留，只是不扫码"],
+    ["扫码入口查仓储条码","扫码页只识别行码、单据号、库位码、申请号；不再实时查仓储找待签收行，也不用仓储条码预览接口"],
+    ["拆分向仓储申请新码","改为本系统发 RM 新码（余量也换新码），本系统打印标签；守恒、最多三层、父子追溯不变"],
+    ["签收前的 LN 内部编号","生成领用行时就发 RM 行码，签收前后码不变，签收前也能打标签"],
+    ["码状态 B1“已赋码（仓储在库）”","不出现，行码从 B2 已领用开始"],
+    ["码绑定率按仓储条码计","按行码计（见右侧第 4 条）"],
+    ["前端扫仓储码的界面","签收弹窗的“已扫 x / y”、扫码页的仓储条码卡片自动隐藏"],
+    ["仓储相关配置","不填 WMS_BASE_URL、WMS_TOKEN、WMS_TIMEOUT"]
+  ];
+  const esc=t=>String(t).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+  document.getElementById('skip').innerHTML=SKIP.map(([a,b])=>`<tr><td data-l="功能">${esc(a)}</td><td data-l="一期怎么处理">${esc(b)}</td></tr>`).join('');
+
+  const LANES=["使用人","直属上级","领料专员","财务 + IT","企业微信","RMLM 中台","金蝶 ERP"], SYS=4;
+  const LW=92, CW=92, BW=86, BH=64, LH=84, COLS=12, W=LW+COLS*CW+8, H=LANES.length*LH;
+  // [泳道, 列, 标题, 说明行, 操作所在系统, 一期变化]
+  const N={
+    n1:[0,0,"提需求",["项目从 ERP 选","原因 R01–R06"],"RMLM"],
+    s1:[5,1,"生成申请",["待直属上级审核"]],
+    x1:[4,1,"推送审核待办",["4h 提醒·24h 升级"]],
+    n2:[1,2,"审核",["同意或驳回"],"RMLM"],
+    x4:[4,2,"推送待开单",["给领料专员"]],
+    n3:[2,3,"开领料单",["备注写申请号"],"金蝶"],
+    e1:[6,3,"领料出库",["QTCK 过账","仓库发实物"]],
+    s2:[5,4,"生成领用行",["按申请号匹配","发 RM 行码 · S0"],null,1],
+    x2:[4,4,"推送签收待办",["点开直达本行"]],
+    n4:[0,5,"选单号签收",["或扫行码·拍照","不许代签 · S1"],"RMLM",1],
+    n5:[0,6,"打印贴行码",["50×30 标签","贴在实物上"],"RMLM",1],
+    n6:[0,7,"使用与流转",["拆分发 RM 新码","转交·外出"],"RMLM",1],
+    n7:[0,8,"退库/报废登记",["登记即扣结存","S6 待开单"],"RMLM"],
+    n8:[2,8,"开退料/报废单",["多行并一单","报废每周按箱"],"金蝶"],
+    e2:[6,8,"退料·报废出库",["QTRK·报废单","仓库收实物"]],
+    s3:[5,9,"分摊到行",["先进先出","S7 已结案"]],
+    s4:[5,10,"每日对账",["单号+行号+数量","含金蝶反审核"]],
+    x3:[4,10,"差异派单",["办完自动关闭","未办 48h 升级"]],
+    n9:[2,10,"认领差异",["选原因码·消差"],"RMLM"],
+    n10:[3,11,"关闭与关账",["差异清零","每月 3 日前"],"RMLM"]
+  };
+  const E=[["n1","s1"],["s1","x1"],["x1","n2"],["n2","n3"],["n2","x4"],["x4","n3"],["n3","e1","过账"],
+    ["e1","s2","拉单",1],["s2","x2"],["x2","n4"],["n4","n5"],["n5","n6"],["n6","n7"],["n7","n8"],
+    ["n8","e2","过账"],["e2","s3","按单号取",1],["s3","s4"],["s4","x3"],["x3","n9"],["n9","n10"]];
+  const bx=id=>{const n=N[id];return {x:LW+n[1]*CW+5,y:n[0]*LH+10,l:n[0],c:n[1]}};
+  let s='<defs><marker id="ah2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="ah"/></marker></defs>';
+  LANES.forEach((name,i)=>{
+    const sys=i>=SYS;
+    s+=`<rect x="0" y="${i*LH}" width="${W}" height="${LH}" class="${sys?'lanes':'lane'}${i%2}"/>`;
+    if(i) s+=`<line x1="0" x2="${W}" y1="${i*LH}" y2="${i*LH}" class="${i===SYS?'lanesep2':'lanesep'}"/>`;
+    s+=sys?`<text x="12" y="${i*LH+LH/2-2}" class="lanet lanetsys">${name}</text><text x="12" y="${i*LH+LH/2+14}" class="lanesub">系统</text>`
+          :`<text x="12" y="${i*LH+LH/2+4}" class="lanet">${name}</text>`;
+  });
+  s+=`<line x1="${LW}" x2="${LW}" y1="0" y2="${H}" class="lanesep"/>`;
+  E.forEach(e=>{
+    const a=bx(e[0]), b=bx(e[1]); let d;
+    if(a.c===b.c){
+      const x=a.x+BW/2;
+      d=b.l>a.l?`M${x},${a.y+BH} V${b.y-2}`:`M${x},${a.y} V${b.y+BH+2}`;
+      if(e[2]) s+=`<text x="${x+6}" y="${(b.l>a.l?a.y+BH+b.y:a.y+b.y+BH)/2+4}" class="c">${e[2]}</text>`;
+    } else {
+      const sx=a.x+BW, sy=a.y+BH/2, ty=b.y+BH/2, mx=sx+(CW-BW)/2;
+      d=sy===ty?`M${sx},${sy} H${b.x-2}`:`M${sx},${sy} H${mx} V${ty} H${b.x-2}`;
+      if(e[2]) s+=`<text x="${sx+8}" y="${(sy+ty)/2+4}" class="c">${e[2]}</text>`;
+    }
+    s+=`<path d="${d}" class="ln${e[3]?' dash':''}" marker-end="url(#ah2)"/>`;
+  });
+  const LANECLS={4:'n-wx',5:'n-sys',6:'n-erp'};
+  Object.keys(N).forEach(id=>{
+    const n=N[id], p=bx(id), cx=p.x+BW/2, lines=n[3], where=n[4];
+    const cls=n[5]?'n-new':(LANECLS[n[0]]||'n-act');
+    s+=`<rect x="${p.x}" y="${p.y}" width="${BW}" height="${BH}" rx="7" class="${cls}"/>`;
+    const block=15+13*lines.length+(where?13:0), ty=p.y+(BH-block)/2+12;
+    s+=`<text x="${cx}" y="${ty}" text-anchor="middle" class="nt">${n[2]}</text>`;
+    lines.forEach((t,i)=>{s+=`<text x="${cx}" y="${ty+15+i*13}" text-anchor="middle" class="ns">${t}</text>`});
+    if(where) s+=`<text x="${cx}" y="${ty+15+lines.length*13}" text-anchor="middle" class="nw">在 ${where}</text>`;
+  });
+  const svg=document.getElementById('flow');
+  svg.setAttribute('viewBox',`0 0 ${W} ${H}`);
+  svg.innerHTML=s;
+}
+</script>

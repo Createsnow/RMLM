@@ -23,7 +23,7 @@ export const store = reactive({
   token: read(TOKEN) || '',
   user: parse(read(USER)),
   dicts: {},
-  counts: { tasks: 0, notices: 0 }
+  counts: { tasks: 0, notices: 0, by_kind: {} }
 })
 
 // 凭证里的账号 ID（只用来判断两份凭证是不是同一个人，不做校验）

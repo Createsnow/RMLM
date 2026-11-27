@@ -88,7 +88,7 @@
             <span v-if="e.etype === 'CONCLUSION'"> · 对应 #{{ e.extra?.for }}</span>
             <el-tag v-if="e.status !== 'EFFECTIVE'" size="small" :type="e.status === 'PENDING' ? 'warning' : 'info'" style="margin-left: 6px">{{ { PENDING: e.etype === 'TRANSFER_REQ' && !e.to_user ? '待认领' : '待确认', ASSIGNED: '已指派', CANCELLED: '已撤回' }[e.status] || '已拒绝' }}</el-tag>
             <el-tag v-if="e.reversed" size="small" type="info" style="margin-left: 6px">已冲销</el-tag>
-            <el-tag v-if="e.is_proxy" size="small" type="warning" style="margin-left: 6px">代登</el-tag>
+            <el-tag v-if="e.is_proxy" size="small" type="warning" style="margin-left: 6px">代录</el-tag>
             <div class="muted">经手 {{ e.operator }}<span v-if="e.reason"> · {{ e.reason }}</span><span v-if="e.note"> · {{ e.note }}</span>
               <span v-if="e.extra?.children"> · 新码 {{ e.extra.children.join('、') }}</span>
               <span v-if="e.etype === 'BIND_CODE'"> · {{ e.extra.old }} → {{ e.extra.new }}</span></div>
@@ -125,7 +125,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, reactive, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
@@ -135,6 +135,7 @@ import PhotoThumbs from '../components/PhotoThumbs.vue'
 import PhotoPicker from '../components/PhotoPicker.vue'
 import RemoteSelect from '../components/RemoteSelect.vue'
 import BalanceBar from '../components/BalanceBar.vue'
+import { useRefresh } from '../useRefresh'
 
 const route = useRoute()
 const mobile = computed(() => route.path.startsWith('/m'))
@@ -148,7 +149,10 @@ const cf = reactive({ text: '', photos: [] })
 
 async function load() {
   l.value = await api.get(`/api/lines/${route.params.id}`)
-  // 从扫码页扫到待签收的仓储条码过来：直接打开签收并带上这个码
+}
+async function firstLoad() {
+  await load()
+  // 从扫码页扫到待签收的仓储条码过来：直接打开签收并带上这个码（只在打开页面时，切回页签刷新时不再弹）
   if ((route.query.sign_code || route.query.sign) && l.value.actions.sign) setTimeout(() => ops.value.open('sign', { code: route.query.sign_code ? String(route.query.sign_code) : '' }))
 }
 function op(k) { ops.value.open(k) }
@@ -189,7 +193,7 @@ async function reverse(e) {
   ElMessage.success('已提交冲销，等待 IT 复核')
   load()
 }
-onMounted(load)
+useRefresh(load, firstLoad)
 </script>
 
 <style scoped>

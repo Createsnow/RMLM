@@ -41,16 +41,17 @@
       <el-button type="primary" @click="decide(true)">同意</el-button>
       <el-button type="danger" plain @click="decide(false)">驳回</el-button>
     </div>
-    <el-button v-if="r.can_cancel" @click="cancel">撤回申请</el-button>
+    <el-button v-if="r.can_cancel" @click="cancel">{{ r.status === 'APPROVED' ? '撤回未开单部分' : '撤回申请' }}</el-button>
   </div>
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
 import { REQ_STATUS, dictName } from '../utils'
+import { useRefresh } from '../useRefresh'
 
 const route = useRoute()
 const mobile = computed(() => route.path.startsWith('/m'))
@@ -67,5 +68,5 @@ async function cancel() {
   await api.post(`/api/requisitions/${r.value.id}/cancel`)
   load()
 }
-onMounted(load)
+useRefresh(load)
 </script>

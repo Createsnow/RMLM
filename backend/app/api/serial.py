@@ -36,11 +36,15 @@ def user_out(u: User | None, db: Session | None = None) -> dict | None:
     return d
 
 
-def check_photos(db: Session, ids) -> list[int]:
+def check_photos(db: Session, ids, user: User) -> list[int]:
+    """登记时引用的照片必须存在，且是本人上传的（代登时是代登人自己拍的）：不能拿别人的照片当证据。"""
     ids = [int(i) for i in (ids or [])]
     for i in ids:
-        if not db.get(Photo, i):
+        p = db.get(Photo, i)
+        if not p:
             raise BizError("照片不存在，请重新上传")
+        if p.uploader_id != user.id:
+            raise BizError("只能使用本人上传的照片，请重新拍照")
     return ids
 
 
@@ -104,7 +108,7 @@ def line_out(db: Session, line: LedgerLine, viewer: User, c=None, full: bool = F
     if holder.frozen:
         flags.append("冻结")
     if c.proxy_events:
-        flags.append("代登")
+        flags.append("代录")
     if line.self_issue:
         flags.append("自领自开")
     if st not in ("S6", "S7") and (c.scrap_pending > 0 or c.return_pending > 0):

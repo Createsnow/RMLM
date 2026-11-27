@@ -82,7 +82,7 @@ def test_consume_loss_and_proxy(org, ref):
     assert out["loss"] == "0.7" and out["balance"] == "5.3"
     # 同组成员可代登并留痕通知；其他组成员不行
     out = org.ok(org.post("a2", f"/api/lines/{lid}/consume", {"qty": 1, "dest": "D01", "ship_no": "XSCK-T001", "photos": [org.photo("a2")]}))
-    assert "代登" in out["flags"]
+    assert "代录" in out["flags"]
     todos = org.ok(org.get("a1", "/api/todos"))
     assert any("代您登记" in t["title"] for t in todos)
     assert org.post("b1", f"/api/lines/{lid}/consume",
@@ -172,15 +172,16 @@ def test_return_many_to_many_and_recon(org, ref):
     diffs = [d for d in org.ok(org.get("keeper", "/api/recon/diffs")) if d["erp_doc_no"] == t2["no"]]
     assert diffs and diffs[0]["diff"] == "1"
     d = diffs[0]
-    # 差额不为 0 不能关闭；ERP 侧开调整单并经财务审核后才平
-    r = org.post("keeper", f"/api/recon/diffs/{d['id']}/resolve", {"reason_code": "C03", "method": "BIND"})
+    # 领料专员认领；关闭差异由财务 / IT 完成。差额不为 0 不能关闭；ERP 侧开调整单并经财务审核后才平
+    org.ok(org.post("keeper", f"/api/recon/diffs/{d['id']}/claim"))
+    r = org.post("fin", f"/api/recon/diffs/{d['id']}/resolve", {"reason_code": "C03", "method": "BIND"})
     assert r.status_code == 400 and "差额" in r.json()["detail"]
     tz = erp_doc(org, "TZ", [{"material_code": "M-CABLE", "qty": -1, "ref_line_no": 1}], ref_doc_no=t2["no"])
-    r = org.post("keeper", f"/api/recon/diffs/{d['id']}/resolve",
+    r = org.post("fin", f"/api/recon/diffs/{d['id']}/resolve",
                  {"reason_code": "C03", "method": "ADJUST", "ref": tz["no"]})
     assert "财务" in r.json()["detail"]
     org.ok(org.post("fin", f"/api/erp/docs/{tz['id']}/finance-approve"))
-    org.ok(org.post("keeper", f"/api/recon/diffs/{d['id']}/resolve",
+    org.ok(org.post("fin", f"/api/recon/diffs/{d['id']}/resolve",
                     {"reason_code": "C03", "method": "ADJUST", "ref": tz["no"]}))
 
 
@@ -245,11 +246,12 @@ def test_urgent_handover_and_resolution(org, ref):
     assert "紧急·待补" not in out["flags"]
 
 
-def test_urgent_rejected_must_return(org, ref):
+def test_urgent_cannot_be_rejected_after_handover(org, ref):
+    """业务确认（2026-11-25）：先交接凭口头同意，未通过审核就不可能领到实物，交接后只能审核通过。"""
     req = make_req(org, ref, urgent=True, urgent_note="口头同意")
-    line = org.ok(org.post("keeper", f"/api/requisitions/{req['id']}/urgent-handover/{req['items'][0]['id']}"))
-    org.ok(org.post("lead_a", f"/api/requisitions/{req['id']}/decide", {"approve": False, "note": "不需要"}))
-    assert any(t["kind"] == "MUST_RETURN" and t["ref_id"] == line["id"] for t in org.ok(org.get("a1", "/api/todos")))
+    org.ok(org.post("keeper", f"/api/requisitions/{req['id']}/urgent-handover/{req['items'][0]['id']}"))
+    r = org.post("lead_a", f"/api/requisitions/{req['id']}/decide", {"approve": False, "note": "不需要"})
+    assert r.status_code == 400 and "只能审核通过" in r.json()["detail"]
 
 
 # ------------------------------------------------------------------ 审核时限

@@ -32,10 +32,12 @@ def verify_password(pw: str, hashed: str) -> bool:
         return False
 
 
-def make_token(user: User) -> str:
+def make_token(user: User, method: str = "pw") -> str:
+    """method：pw 账号密码登录 / wx 企业微信网页授权登录。v = 用户的凭证版本，改密码后旧凭证失效。"""
     # 过期时间用真实时间戳（不受业务时钟影响）
     now = int(time.time())
-    payload = {"sub": str(user.id), "iat": now, "exp": now + settings.jwt_hours * 3600}
+    payload = {"sub": str(user.id), "iat": now, "exp": now + settings.jwt_hours * 3600,
+               "v": user.token_version or 0, "m": method}
     return jwt.encode(payload, settings.jwt_secret, algorithm="HS256")
 
 
@@ -50,7 +52,11 @@ def current_user(request: Request, authorization: str | None = Header(default=No
     user = db.get(User, int(payload["sub"]))
     if not user or not user.active:
         raise BizError("账号不可用", 401)
-    # 没有 iat 的是续期功能上线前签发的旧凭证，直接续期
+    if int(payload.get("v", 0)) != (user.token_version or 0):
+        raise BizError("密码已修改，请重新登录", 401)
+    # 登录方式（pw 账号密码 / wx 企业微信）：本人改密码后换发新凭证时沿用。业务确认不强制改密码，只提供改密入口
+    request.state.login_method = payload.get("m")
+    # 滑动续期，沿用原登录方式；没有 iat 的是续期功能上线前签发的旧凭证，直接续期
     if time.time() - payload.get("iat", 0) >= RENEW_AFTER:
-        request.state.new_token = make_token(user)
+        request.state.new_token = make_token(user, payload.get("m") or "pw")
     return user

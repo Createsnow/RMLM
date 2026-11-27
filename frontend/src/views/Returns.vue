@@ -29,7 +29,7 @@
           <div style="margin: 10px 0">已选 <b>{{ sel.length }}</b> 条退库登记，合计待摊 <b>{{ selSum }}</b></div>
           <el-button type="primary" :disabled="!docId || !sel.length" style="width: 100%" @click="allocate">按物料分摊</el-button>
           <el-alert v-if="result" :type="result.leftover.length ? 'warning' : 'success'" :closable="false" style="margin-top: 10px"
-                    :title="`已生成 ${result.allocations} 条分摊${result.cross_doc ? '（跨单匹配）' : ''}${result.leftover.length ? '；未摊完：' + result.leftover.map(x => '第' + x.line_no + '行 ' + x.unallocated).join('，') + '，已进差异池' : ''}`" />
+                    :title="`已生成 ${result.allocations} 条分摊${result.cross_doc ? '（跨单匹配）' : ''}${result.leftover.length ? '；未摊完：' + result.leftover.map(x => '第' + x.line_no + '行 ' + x.unallocated).join('，') + '，已进对账差异' : ''}`" />
         </div>
       </el-col>
     </el-row>
@@ -37,8 +37,9 @@
 </template>
 
 <script setup>
+import { useRefresh } from '../useRefresh'
 defineProps({ embedded: Boolean })
-import { computed, onMounted, ref } from 'vue'
+import { computed, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { api } from '../api'
 import { hasRole } from '../store'
@@ -70,5 +71,5 @@ async function allocate() {
   result.value = await api.post('/api/returns/allocate', { erp_doc_id: docId.value, event_ids: sel.value.map(r => r.event_id) })
   load()
 }
-onMounted(load)
+useRefresh(load)
 </script>

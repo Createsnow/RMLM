@@ -16,6 +16,7 @@ from datetime import datetime
 os.environ.setdefault("RMLM_DATABASE_URL",
                       "mysql+pymysql://rmlm:rmlm_dev@127.0.0.1:3306/rmlm_test?charset=utf8mb4")
 os.environ["RMLM_SCHEDULER"] = "0"
+os.environ.setdefault("RMLM_JWT_SECRET", "test-only-secret-0123456789abcdef")
 os.environ["RMLM_PHOTO_DIR"] = tempfile.mkdtemp(prefix="rmlm-photos-")
 
 import pytest

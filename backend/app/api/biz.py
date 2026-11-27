@@ -12,7 +12,7 @@ from ..errors import BizError, forbid
 from ..models import ErpDoc, ErpLine, Event, LedgerLine, Material, PeriodClose, ReconDiff, Requisition, ScrapBatch, User
 from ..perms import active_delegates, can_view_line, has_role, require_role, visible_user_ids
 from ..security import current_user
-from ..services import disposal, doc_sync, erp as erpsvc, ledger, lineops, recon, reports
+from ..services import disposal, doc_sync, erp as erpsvc, ledger, lineops, recon, reports, todo_sweep
 from ..services import requisition as reqsvc
 from ..services.k3cloud import K3Error
 from ..services.recon import KIND_NAMES
@@ -88,7 +88,7 @@ def get_req(rid: int, user: User = Depends(current_user), db: Session = Depends(
         raise forbid()
     d = req_out(db, r, detail=True)
     d["can_approve"] = r.status == "PENDING" and reqsvc.approver_capacity(db, user, r) is not None
-    d["can_cancel"] = r.status == "PENDING" and user.id in (r.user_id, r.created_by)
+    d["can_cancel"] = reqsvc.can_cancel(db, user, r)
     return d
 
 
@@ -185,9 +185,22 @@ def erp_doc_sync_status(user: User = Depends(current_user), db: Session = Depend
     return doc_sync.status(db)
 
 
+class DocAutoSyncIn(BaseModel):
+    enabled: bool
+    interval: int  # 分钟：15 / 30 / 60 / 120 / 240 / 480 / 720 / 1440
+
+
+@router.put("/erp/docs/sync/settings")
+def erp_doc_sync_settings(body: DocAutoSyncIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """修改金蝶领料单自动同步的开关与间隔（管理员）。只影响定时巡检，不影响手动同步。"""
+    require_role(user, "ADMIN")
+    doc_sync.save_auto_settings(db, user.id, body.enabled, body.interval)
+    return doc_sync.status(db)
+
+
 @router.post("/erp/docs/sync")
 def erp_doc_sync(full: bool = False, user: User = Depends(current_user), db: Session = Depends(get_db)):
-    """立即从金蝶拉取单据并自动生成领用行（定时任务每 15 分钟也会做）。默认增量，full=true 全量。"""
+    """立即从金蝶拉取单据并自动生成领用行（定时任务按网页设置的间隔也会做）。默认增量，full=true 全量。"""
     require_role(user, "KEEPER", "ADMIN")
     try:
         out = doc_sync.sync_docs(db, full=full)
@@ -385,6 +398,7 @@ class DueIn(BaseModel):
 def _done(db: Session, user: User, line: LedgerLine, extra: dict | None = None) -> dict:
     db.flush()
     db.refresh(line)
+    todo_sweep.sweep_line(db, line)  # 动作做完，已办完的处置类待办（超期、须全额退库、结项清零等）当场关闭
     d = line_out(db, line, user, full=True)
     if extra:
         d["result"] = extra
@@ -394,7 +408,7 @@ def _done(db: Session, user: User, line: LedgerLine, extra: dict | None = None) 
 @router.post("/lines/{lid}/sign")
 def sign(lid: int, body: SignIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
     line = _line(db, user, lid)
-    lines = lineops.sign(db, line, user, check_photos(db, body.photos), body.codes, note=body.note)
+    lines = lineops.sign(db, line, user, check_photos(db, body.photos, user), body.codes, note=body.note)
     return _done(db, user, line, {"lines": [{"id": l.id, "code": l.code, "qty": s(l.qty)} for l in lines]}
                  if len(lines) > 1 else None)
 
@@ -404,7 +418,7 @@ def batch_sign(body: BatchSignIn, user: User = Depends(current_user), db: Sessio
     """整单批量签收：一人领整单时一次确认本人名下、同一张已过账单据上的多条待签收行。"""
     for lid in body.line_ids:
         _line(db, user, lid)
-    lines = lineops.batch_sign(db, body.line_ids, user, check_photos(db, body.photos), body.codes, note=body.note)
+    lines = lineops.batch_sign(db, body.line_ids, user, check_photos(db, body.photos, user), body.codes, note=body.note)
     db.flush()
     return {"signed": len(lines), "lines": [{"id": l.id, "code": l.code, "qty": s(l.qty)} for l in lines]}
 
@@ -430,7 +444,7 @@ def wms_barcode(code: str, user: User = Depends(current_user), db: Session = Dep
 def consume(lid: int, body: ConsumeIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
     line = _line(db, user, lid)
     lineops.consume(db, line, user, body.qty, body.dest, body.is_loss, body.loss_reason, body.note,
-                    check_photos(db, body.photos), ship_no=body.ship_no, location_id=body.location_id)
+                    check_photos(db, body.photos, user), ship_no=body.ship_no, location_id=body.location_id)
     return _done(db, user, line)
 
 
@@ -438,14 +452,14 @@ def consume(lid: int, body: ConsumeIn, user: User = Depends(current_user), db: S
 def split(lid: int, body: SplitIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
     line = _line(db, user, lid)
     res = lineops.split(db, line, user, body.pieces, body.loss_qty, body.loss_reason, body.note,
-                        check_photos(db, body.photos))
+                        check_photos(db, body.photos, user))
     return _done(db, user, line, res)
 
 
 @router.post("/lines/{lid}/hold")
 def hold(lid: int, body: LocIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
     line = _line(db, user, lid)
-    lineops.hold(db, line, user, body.location_id, body.note, check_photos(db, body.photos), dest=body.dest,
+    lineops.hold(db, line, user, body.location_id, body.note, check_photos(db, body.photos, user), dest=body.dest,
                  location_text=body.location_text)
     return _done(db, user, line)
 
@@ -453,7 +467,7 @@ def hold(lid: int, body: LocIn, user: User = Depends(current_user), db: Session 
 @router.post("/lines/{lid}/move")
 def move(lid: int, body: LocIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
     line = _line(db, user, lid)
-    lineops.move(db, line, user, body.location_id, body.note, check_photos(db, body.photos),
+    lineops.move(db, line, user, body.location_id, body.note, check_photos(db, body.photos, user),
                  location_text=body.location_text)
     return _done(db, user, line)
 
@@ -501,7 +515,7 @@ class ConclusionIn(PhotoIn):
 def conclusion(eid: int, body: ConclusionIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
     ev = get_or_404(db, Event, eid, "事件")
     line = _line(db, user, ev.line_id)
-    lineops.conclusion(db, ev, user, body.text, check_photos(db, body.photos) if body.photos else None)
+    lineops.conclusion(db, ev, user, body.text, check_photos(db, body.photos, user) if body.photos else None)
     return _done(db, user, line)
 
 
@@ -524,21 +538,21 @@ def transfer_decide(eid: int, accept: bool, user: User = Depends(current_user), 
 @router.post("/lines/{lid}/return")
 def return_(lid: int, body: QtyIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
     line = _line(db, user, lid)
-    lineops.return_(db, line, user, body.qty, body.note, check_photos(db, body.photos))
+    lineops.return_(db, line, user, body.qty, body.note, check_photos(db, body.photos, user))
     return _done(db, user, line)
 
 
 @router.post("/lines/{lid}/scrap")
 def scrap(lid: int, body: ScrapIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
     line = _line(db, user, lid)
-    lineops.scrap(db, line, user, body.mode, body.qty, body.reason, body.box, body.note, check_photos(db, body.photos))
+    lineops.scrap(db, line, user, body.mode, body.qty, body.reason, body.box, body.note, check_photos(db, body.photos, user))
     return _done(db, user, line)
 
 
 @router.post("/lines/{lid}/qconfirm")
 def qconfirm(lid: int, body: PhotoIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
     line = _line(db, user, lid)
-    lineops.quarter_confirm(db, line, user, body.note, check_photos(db, body.photos))
+    lineops.quarter_confirm(db, line, user, body.note, check_photos(db, body.photos, user))
     return _done(db, user, line)
 
 
@@ -578,6 +592,8 @@ def line_requests(user: User = Depends(current_user), db: Session = Depends(get_
 @router.post("/line-requests/{eid}/decide")
 def line_request_decide(eid: int, body: ReviewIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
     ev = lineops.line_request_decide(db, get_or_404(db, Event, eid, "申请"), user, body.approve, body.note)
+    db.flush()
+    todo_sweep.sweep_line(db, db.get(LedgerLine, ev.line_id))  # 归还日延后、不再超期：超期待办关闭
     return {"ok": True, "status": ev.status}
 
 
@@ -609,6 +625,8 @@ def reversals(status: str = "PENDING", user: User = Depends(current_user), db: S
 def reversal_decide(eid: int, body: ReviewIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
     ev = lineops.reversal_decide(db, get_or_404(db, Event, eid, "冲销"), user, body.approve, body.note)
     recon.run(db)
+    db.flush()
+    todo_sweep.sweep_line(db, db.get(LedgerLine, ev.line_id))  # 冲销后结存 / D02 待回填可能变化
     return {"ok": True, "status": ev.status}
 
 
@@ -698,7 +716,7 @@ def diffs(period: str = "", state: str = "", user: User = Depends(current_user),
              "erp_doc_no": d.erp_doc_no, "erp_line_no": d.erp_line_no, "line_id": d.line_id, "event_id": d.event_id,
              "material": (mats[d.material_id].name if d.material_id in mats else None),
              "erp_qty": s(d.erp_qty), "detail_qty": s(d.detail_qty), "diff": s(d.diff), "owner": names.get(d.owner_id),
-             "claimed_at": s(d.claimed_at), "reason_code": d.reason_code, "method": d.method, "method_ref": d.method_ref,
+             "owner_id": d.owner_id, "claimed_at": s(d.claimed_at), "reason_code": d.reason_code, "method": d.method, "method_ref": d.method_ref,
              "note": d.note, "state": d.state, "escalation": d.escalation, "created_at": s(d.created_at),
              "resolved_at": s(d.resolved_at)} for d in db.scalars(stmt)]
 

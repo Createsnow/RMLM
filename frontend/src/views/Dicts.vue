@@ -1,7 +1,7 @@
 <template>
   <div>
     <div class="page-head">
-      <h2>字典与规则</h2><span class="sub">业务只能选、不能加；变更由系统管理员提出、研发副总批准，只能新增 / 停用 / 改名，不能删除</span>
+      <h2>数据字典</h2><span class="sub">业务只能选、不能加；变更由系统管理员提出、研发副总批准，只能新增 / 停用 / 改名，不能删除</span>
       <span class="grow" />
       <el-button v-if="hasRole('ADMIN')" type="primary" @click="dlg = true">提出变更</el-button>
     </div>
@@ -17,7 +17,7 @@
         </div>
       </el-col>
     </el-row>
-    <div class="card"><h3>现有台账 → 新系统的关键转换规则 <span class="muted">历史基线导入用同一套规则</span></h3>
+    <div class="card"><h3>现有台账 → 新系统的关键转换规则 <span class="muted">历史台账导入用同一套规则</span></h3>
       <el-table :data="rules" size="small">
         <el-table-column prop="name" label="规则" width="150" />
         <el-table-column label="现有字段（自由文本）关键词" width="260"><template #default="{ row }">{{ row.keywords.join(' / ') || '—' }}</template></el-table-column>
@@ -55,11 +55,12 @@
 </template>
 
 <script setup>
-import { onMounted, reactive, ref } from 'vue'
+import { reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { api } from '../api'
 import { hasRole, store } from '../store'
 import { dictName, loadDicts } from '../utils'
+import { useRefresh } from '../useRefresh'
 
 const NAMES = { DEST: '去向 DICT_DEST', LINE_STATUS: '行状态 DICT_STATUS', CODE_STATUS: '物料码状态', REASON: '领料原因', LOSS_REASON: '损耗原因',
   SCRAP_REASON: '报废原因', RECON_REASON: '差异原因码', DOC_TYPE: 'ERP 单据类型' }
@@ -74,5 +75,5 @@ async function load() {
 }
 async function submit() { await api.post('/api/dict-changes', f); ElMessage.success('已提交'); dlg.value = false; load() }
 async function decide(row, approve) { await api.post(`/api/dict-changes/${row.id}/decide?approve=${approve}`); load() }
-onMounted(load)
+useRefresh(load)
 </script>
