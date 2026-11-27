@@ -1,5 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import { store } from './store'
+import { store, safeNext } from './store'
 import { isMobile } from './utils'
 
 const PcLayout = () => import('./layouts/PcLayout.vue')
@@ -62,6 +62,8 @@ const routes = [
 const router = createRouter({ history: createWebHistory(), routes })
 
 router.beforeEach(to => {
+  // 已登录（例如在新页面打开登录地址）直接进系统；企微授权回调（带 code）仍交给登录页处理
+  if (to.path === '/login' && store.token && !to.query.code) return safeNext(to.query.next) || '/'
   if (!to.meta.public && !store.token) return { path: '/login', query: to.fullPath === '/' ? {} : { next: to.fullPath } }
   if (to.path === '/' && isMobile() && !sessionStorage.getItem('rmlm_pc')) return '/m'
   document.title = `${to.meta.title ? to.meta.title + ' · ' : ''}研发物料管家`

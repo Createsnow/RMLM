@@ -20,7 +20,7 @@
 import { onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api } from '../api'
-import { setLogin } from '../store'
+import { safeNext, setLogin } from '../store'
 import { isMobile } from '../utils'
 
 const router = useRouter()
@@ -33,8 +33,7 @@ const wxError = ref('')
 const inWeCom = /wxwork/i.test(navigator.userAgent)
 
 function nextPath() {
-  const n = route.query.next
-  return typeof n === 'string' && n.startsWith('/') && !n.startsWith('//') && !n.startsWith('/login') ? n : (isMobile() ? '/m' : '/')
+  return safeNext(route.query.next) || (isMobile() ? '/m' : '/')
 }
 function session(key, val) {
   try {

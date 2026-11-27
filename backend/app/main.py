@@ -14,7 +14,7 @@ from .api import biz, core
 from .config import settings
 from .dicts import SEED
 from .models import AuditLog, DictItem, User
-from .security import hash_password
+from .security import RENEW_HEADER, hash_password
 
 log = logging.getLogger("rmlm")
 
@@ -110,6 +110,10 @@ async def audit(request: Request, call_next):
         elif ctype.startswith("multipart/"):
             body_text = "(文件上传)"
     response = await call_next(request)
+    # 登录凭证滑动续期（见 security.current_user）：文件下载等直接返回 Response 的接口也能带上
+    new_token = getattr(request.state, "new_token", None)
+    if new_token:
+        response.headers[RENEW_HEADER] = new_token
     if request.method in ("POST", "PUT", "DELETE", "PATCH") and request.url.path.startswith("/api/"):
         uid = None
         auth = request.headers.get("authorization", "")
