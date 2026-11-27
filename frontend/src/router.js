@@ -1,3 +1,4 @@
+import { watch } from 'vue'
 import { createRouter, createWebHistory } from 'vue-router'
 import { store, safeNext } from './store'
 import { isMobile } from './utils'
@@ -62,11 +63,19 @@ const routes = [
 const router = createRouter({ history: createWebHistory(), routes })
 
 router.beforeEach(to => {
-  // 已登录（例如在新页面打开登录地址）直接进系统；企微授权回调（带 code）仍交给登录页处理
-  if (to.path === '/login' && store.token && !to.query.code) return safeNext(to.query.next) || '/'
+  // 已登录（例如在新页签打开登录地址）直接进系统；企微授权回调（带 code）、切换账号（带 switch）仍交给登录页处理
+  if (to.path === '/login' && store.token && !to.query.code && to.query.switch === undefined) return safeNext(to.query.next) || '/'
   if (!to.meta.public && !store.token) return { path: '/login', query: to.fullPath === '/' ? {} : { next: to.fullPath } }
   if (to.path === '/' && isMobile() && !sessionStorage.getItem('rmlm_pc')) return '/m'
-  document.title = `${to.meta.title ? to.meta.title + ' · ' : ''}研发物料管家`
 })
+
+// 浏览器页签标题；本浏览器登录了多个账号时在前面加上本页签的账号，方便分辨
+let pageTitle = ''
+function renderTitle() {
+  const who = store.accounts.length > 1 && store.token && store.user?.name ? `[${store.user.name}] ` : ''
+  document.title = `${who}${pageTitle ? pageTitle + ' · ' : ''}研发物料管家`
+}
+router.afterEach(to => { pageTitle = to.meta.title || ''; renderTitle() })
+watch([() => store.accounts.length, () => store.token && store.user?.name], renderTitle)
 
 export default router

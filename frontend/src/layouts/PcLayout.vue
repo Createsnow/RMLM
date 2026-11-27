@@ -94,6 +94,9 @@
               <el-dropdown-item command="password" divided :icon="Lock">修改密码</el-dropdown-item>
               <el-dropdown-item command="delegates" :icon="Switch">代理审核设置</el-dropdown-item>
               <el-dropdown-item command="mobile" :icon="Iphone">切换到手机版</el-dropdown-item>
+              <!-- 同一浏览器可同时登录多个账号：每个浏览器页签各用一个账号 -->
+              <el-dropdown-item command="switch" divided :icon="Avatar">切换账号</el-dropdown-item>
+              <el-dropdown-item command="newtab" :icon="CirclePlus">新页签登录其他账号</el-dropdown-item>
               <el-dropdown-item command="logout" divided :icon="SwitchButton">退出登录</el-dropdown-item>
             </el-dropdown-menu>
           </template>
@@ -127,7 +130,7 @@
 <script setup>
 import { computed, defineComponent, h, markRaw, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Iphone, Lock, Switch, SwitchButton } from '@element-plus/icons-vue'
+import { Avatar, CirclePlus, Iphone, Lock, Switch, SwitchButton } from '@element-plus/icons-vue'
 import { api } from '../api'
 import { store, setUser, logout } from '../store'
 import { loadDicts } from '../utils'
@@ -258,6 +261,8 @@ function onCommand(cmd) {
   if (cmd === 'password') onMenu('/password')
   else if (cmd === 'delegates') onMenu('/delegates')
   else if (cmd === 'mobile') toMobile()
+  else if (cmd === 'switch') router.push('/login?switch=1') // 本页签换账号；原账号仍保持登录，其他页签照常用
+  else if (cmd === 'newtab') window.open('/login?switch=1', '_blank', 'noopener')
   else if (cmd === 'logout') { resetTabs(); logout() }
 }
 

@@ -1,9 +1,10 @@
 import { ElMessage } from 'element-plus'
-import { store, setToken, sessionExpired, storedToken, syncFromStorage, tokenUid } from './store'
+import { store, adoptToken, latestToken, sessionExpired, setToken, tokenUid } from './store'
 
+// opts.anon：不带本页签的登录凭证（登录接口用：切换账号时输错密码不能把本页签当前的账号退出）
 async function request(method, url, body, opts = {}) {
   const headers = {}
-  const sent = store.token
+  const sent = opts.anon ? '' : store.token
   if (sent) headers.Authorization = `Bearer ${sent}`
   let payload
   if (body instanceof FormData) payload = body
@@ -12,19 +13,18 @@ async function request(method, url, body, opts = {}) {
     payload = JSON.stringify(body)
   }
   const resp = await fetch(url, { method, headers, body: payload })
-  // 服务端滑动续期：换上新凭证（期间本页已换了凭证就不覆盖）
+  // 服务端滑动续期：换上新凭证（期间本页签已换了凭证就不覆盖）
   const renewed = resp.headers.get('X-New-Token')
   if (renewed && sent && store.token === sent) setToken(renewed)
   if (resp.status === 401 && sent) {
-    // 其他页面已经重新登录或续期过：换上最新凭证重试一次，不要把其他页面的登录清掉
-    const latest = storedToken() || store.token
-    if (latest !== sent) {
-      if (!opts.retried && tokenUid(latest) === tokenUid(sent)) {
-        store.token = latest
-        return request(method, url, body, { ...opts, retried: true })
-      }
-      syncFromStorage() // 其他页面换了账号：按那边的登录状态刷新本页
-    } else sessionExpired()
+    // 本页签期间已换了凭证，或同一账号在其他页签续期、改了密码：换上最新凭证重试一次，不要把这个账号退出
+    const uid = tokenUid(sent)
+    const latest = store.token !== sent ? store.token : latestToken(uid)
+    if (!opts.retried && latest && latest !== sent && tokenUid(latest) === uid) {
+      if (store.token === sent) adoptToken(latest)
+      return request(method, url, body, { ...opts, retried: true })
+    }
+    if (store.token === sent) sessionExpired(sent)
   }
   if (opts.raw) return resp
   let data = null

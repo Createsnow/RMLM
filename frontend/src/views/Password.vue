@@ -7,7 +7,10 @@
       <el-form-item label="新密码（至少 8 位）"><el-input v-model="f.new" type="password" show-password /></el-form-item>
       <el-form-item label="再输一次"><el-input v-model="again" type="password" show-password /></el-form-item>
       <el-button type="primary" @click="save">保存</el-button>
-      <el-button v-if="$route.path.startsWith('/m')" @click="logout">退出登录</el-button>
+      <template v-if="$route.path.startsWith('/m')">
+        <el-button @click="$router.push('/login?switch=1')">切换账号</el-button>
+        <el-button @click="logout">退出登录</el-button>
+      </template>
     </el-form>
   </div>
 </template>
