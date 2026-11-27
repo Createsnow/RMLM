@@ -21,13 +21,13 @@ frontend/           Vue 3 前端；Dockerfile + nginx.conf（web 镜像）
 docs/               系统方案、术语表、仓储接口规范、总体架构图、运维手册
 deploy/backup.sh    Docker 部署的每日备份脚本
 Dockerfile          api 镜像
-docker-compose.yml  api + web（+ 可选随附 MySQL）
+docker-compose.yml  api + web（数据库用公司 MySQL，不随附）
 .env.example        配置模板：本机运行与 Docker 部署共用一份 .env
 ```
 
 ## 部署（Docker）
 
-两个容器：**web**（nginx，对外提供页面，并把 `/api` 转发给 api）和 **api**（FastAPI，不对宿主机开放端口）。默认连接公司已有的 MySQL 8；没有时可启用随附的 MySQL 容器。
+两个容器：**web**（nginx，对外提供页面，并把 `/api` 转发给 api）和 **api**（FastAPI，不对宿主机开放端口）。数据库用公司已有的 MySQL 8，不在 Docker 里。
 
 在仓库根目录：
 
@@ -40,8 +40,7 @@ docker compose up -d --build
 
 `.env` 上线前至少改这几项：
 
-- `DB_HOST` 等数据库连接：写 MySQL 服务器的 IP（不能写 127.0.0.1，那是容器自己）。库要提前建好（utf8mb4），表在首次启动时自动建。
-- 没有现成 MySQL 时：取消 `COMPOSE_PROFILES=db` 的注释，`DB_HOST=db`，并设置 `MYSQL_ROOT_PASSWORD`；首次启动按 `DB_NAME` / `DB_USER` / `DB_PASSWORD` 自动建库建号。
+- `DB_HOST` 等数据库连接：写公司 MySQL 服务器的 IP 或域名（不能写 127.0.0.1，那是容器自己）。库要提前建好（utf8mb4），表在首次启动时自动建。
 - `RMLM_JWT_SECRET`（至少 16 位随机字符）、`RMLM_ADMIN_PASSWORD`。
 - 金蝶 `K3_*`、企微 `WECOM_*`、`RMLM_PUBLIC_URL`、仓储 `WMS_*` 按需填写。
 
@@ -59,13 +58,11 @@ docker compose up -d --build
 
 容器日志按 `LOG_MAX_SIZE` × `LOG_MAX_FILE` 轮转；后端进程数 `RMLM_WORKERS`；国内服务器构建慢时设 `NPM_REGISTRY` / `PIP_INDEX_URL` 镜像源。
 
-**从旧版 `deploy/` 目录部署升级**：旧版的 `deploy/.env` 改为根目录 `.env`（按新模板填写；旧的 `MYSQL_PASSWORD` 对应 `DB_PASSWORD`）。旧版自带数据库，要沿用原有数据，在 `.env` 里设 `COMPOSE_PROFILES=db`、`DB_HOST=db`、`DB_NAME=rmlm`、`DB_USER=rmlm`、`PHOTO_VOLUME=deploy_photos`、`MYSQL_VOLUME=deploy_mysql`，先在 `deploy/` 目录执行 `docker compose down` 停掉旧容器（不加 `-v`，数据卷保留），再在根目录启动。启动时提示数据卷“已存在、属于 deploy 项目”属正常。
-
 **网络要求**：服务器要同时满足两头——能访问金蝶内网地址（读物料），又能通过企业已备案的 HTTPS 域名被企微访问（`RMLM_PUBLIC_URL`，需在企微后台设为可信域名）。常见做法是应用部署在内网，由 DMZ 反向代理对外。
 
 上线前在"系统管理 → 用户管理"里建号并勾选角色、设置直属上级（也可 Excel 批量导入），在"基础数据 → 基础资料"里导入项目、物料（含单价）、库位和报废箱。
 
-**备份**：`deploy/backup.sh` 每日备份数据库和照片（数据库连接参数取自运行中的 api 容器；公司 MySQL 已统一备份时用 `SKIP_DB=1` 只备份照片）。照片永久保存，务必纳入备份。
+**备份**：`deploy/backup.sh` 每日备份数据库和照片（直连公司 MySQL 导出，连接参数取自运行中的 api 容器；公司 MySQL 已统一备份时用 `SKIP_DB=1` 只备份照片）。照片永久保存，务必纳入备份。
 
 ## 本地一键启动
 
