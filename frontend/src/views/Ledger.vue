@@ -45,15 +45,18 @@
 
 <script setup>
 import { ref } from 'vue'
+import { useRoute } from 'vue-router'
 import { api } from '../api'
 import { STATUS_TYPE, fmtMoney } from '../utils'
 import BalanceBar from '../components/BalanceBar.vue'
 import { useRefresh } from '../useRefresh'
 
+const route = useRoute()
 const rows = ref([])
 const q = ref('')
-const scope = ref('visible')
-const status = ref('active')
+// 工作台「我的物料」等入口带 ?scope=mine / ?status=S5 打开
+const scope = ref(route.query.scope === 'mine' ? 'mine' : 'visible')
+const status = ref(typeof route.query.status === 'string' ? route.query.status : 'active')
 async function load() {
   rows.value = await api.get(`/api/lines?scope=${scope.value}&status=${status.value}&q=${encodeURIComponent(q.value)}`)
 }

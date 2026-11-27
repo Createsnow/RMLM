@@ -41,14 +41,14 @@ export function todoLink(t, mobile = false) {
   if (t.ref_type === 'event') {
     if (t.kind === 'TRANSFER_CONFIRM') return `${p}/todos?transfer=${t.ref_id}`
     if (t.kind === 'LINE_APPROVE') return `${p}/approve`
-    if (t.kind === 'REVERSAL_REVIEW') return '/reversals'
+    if (t.kind === 'REVERSAL_REVIEW') return '/recon?tab=reversals'
     if (t.kind === 'RETURN_DOC') return '/dispose'
     if (t.kind === 'TRANSFER_ASSIGN') return '/issue'
   }
   if (t.ref_type === 'diff') return '/recon'
   if (t.ref_type === 'erpline') return '/issue'
   if (t.ref_type === 'user') return '/team'
-  if (t.ref_type === 'period') return '/recon'
+  if (t.ref_type === 'period') return '/recon?tab=close'
   if (t.ref_type === 'dictchange') return '/dicts'
   return null
 }

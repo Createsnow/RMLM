@@ -115,20 +115,60 @@
           </div>
         </div>
       </el-tab-pane>
+      <el-tab-pane label="验收指标" name="metrics">
+        <template v-if="dash">
+          <div class="card">
+            <h3>一期验收六个数字 <el-tag :type="dash.gate.passed ? 'success' : 'danger'" size="small">三项门槛{{ dash.gate.passed ? '已达标' : '未达标' }}</el-tag></h3>
+            <el-table :data="metricRows" size="small">
+              <el-table-column prop="name" label="指标" />
+              <el-table-column label="类别" width="90"><template #default="{ row }"><el-tag :type="row.gate ? 'danger' : 'info'" size="small" effect="plain">{{ row.gate ? '门槛' : '观察' }}</el-tag></template></el-table-column>
+              <el-table-column prop="target" label="目标" width="110" />
+              <el-table-column label="当前" width="100"><template #default="{ row }"><b :style="{ color: row.v == null ? '' : row.ok ? '#1c7f47' : '#c0392b' }">{{ row.v ?? '—' }}{{ row.v != null ? '%' : '' }}</b></template></el-table-column>
+              <el-table-column prop="how" label="取数方式" min-width="220" />
+            </el-table>
+            <div class="muted" style="margin-top: 8px">审核 24 小时完成率 {{ pct(dash.observe.approve_24h_rate) }} · 损耗率 {{ pct(dash.observe.loss_rate) }}（只观察，不拦截）</div>
+          </div>
+          <div class="card">
+            <h3>行状态分布</h3>
+            <el-space wrap>
+              <el-tag v-for="(n, k) in dash.status" :key="k" :type="STATUS_TYPE[k]">{{ statusName(k) }}：{{ n }}</el-tag>
+            </el-space>
+          </div>
+        </template>
+      </el-tab-pane>
     </el-tabs>
   </div>
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
 import { hasRole } from '../store'
-import { fmtMoney } from '../utils'
+import { STATUS_TYPE, dictName, fmtMoney } from '../utils'
 import { useRefresh } from '../useRefresh'
 
 const W = { overdue: '超期未结案', urgent: '紧急领用超 24 小时未补', hold_30d: '暂存超 30 天', doc_pending: '待单据处置', lab_pending: 'D02 实验结论超 30 天未回填', level3: '三级挂账（提交月度经营会）' }
-const tab = ref('weekly')
+const route = useRoute()
+const TABS = ['weekly', 'projects', 'loss', 'monthly', 'quarterly', 'parallel', 'metrics']
+const tab = ref(TABS.includes(route.query.tab) ? route.query.tab : 'weekly')
+// 验收指标（原首页「一期验收六个数字」「行状态分布」）
+const dash = ref(null)
+const statusName = k => k === 'VOID' ? '已作废' : (dictName('LINE_STATUS', k).replace(/^S\d /, '') || k)
+const pct = v => v == null ? '—' : `${v}%`
+const metricRows = computed(() => {
+  const g = dash.value.gate, o = dash.value.observe
+  const row = (name, gate, target, v, ok, how) => ({ name, gate, target, v, ok: v == null || ok, how })
+  return [
+    row('项目关联率', true, '100%', g.project_link_rate, g.project_link_rate === 100, '领用行项目命中 ERP 项目档案的占比'),
+    row('码绑定率', true, '≥ 95%', g.code_bind_rate, g.code_bind_rate >= 95, '已绑仓储条码的行 / 已签收行'),
+    row('代录率（签收除外）', true, '< 10%', g.proxy_rate, g.proxy_rate < 10, '经手人 ≠ 持有人的事件占比'),
+    row('对账差异关闭率', false, '月末 100%', o.recon_close_rate, o.recon_close_rate === 100, '对账差异中已平的占比'),
+    row('报废单据覆盖率', false, '≥ 95%', o.scrap_doc_rate, o.scrap_doc_rate >= 95, '已挂 ERP 报废单的整件报废 / 已判废'),
+    row('超期挂账清理率', false, '首季 ≥ 80%', o.overdue_clear_rate, o.overdue_clear_rate >= 80, '本季清理行数 / 季初挂账行数')
+  ]
+})
 const weekly = ref(null)
 const projects = ref([])
 const loss = ref(null)
@@ -167,6 +207,7 @@ async function load() {
   if (tab.value === 'monthly') monthly.value = await api.get(`/api/reports/monthly?period=${period.value}`)
   if (tab.value === 'quarterly') quarterly.value = await api.get('/api/reports/quarterly')
   if (tab.value === 'parallel') await loadPar()
+  if (tab.value === 'metrics') dash.value = await api.get('/api/reports/dashboard')
 }
 useRefresh(load)
 </script>

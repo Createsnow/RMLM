@@ -35,7 +35,7 @@ const routes = [
       { path: 'scrap', redirect: '/dispose?tab=scrap' },
       { path: 'history', component: v('History'), meta: { title: '历史台账' } },
       { path: 'recon', component: v('Recon'), meta: { title: '对账与关账' } },
-      { path: 'reversals', component: v('Reversals'), meta: { title: '冲销' } },
+      { path: 'reversals', redirect: '/recon?tab=reversals' },
       { path: 'reports', component: v('Reports'), meta: { title: '统计报表' } },
       { path: 'master', component: v('Master'), meta: { title: '基础资料' } },
       { path: 'dicts', component: v('Dicts'), meta: { title: '数据字典' } },

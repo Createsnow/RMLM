@@ -1,99 +1,116 @@
 <template>
-  <!-- 电脑版框架，布局参考 MTP：左侧深色侧栏（品牌、分组菜单、底部个人卡片），顶栏为收起按钮 + 页签 + 常用操作，页签切换保留页面内容 -->
-  <el-container class="pc">
-    <el-aside :width="collapsed ? '64px' : '220px'" class="side">
-      <div class="brand" :class="{ mini: collapsed }">
+  <!--
+    电脑版框架，按 ERP 通行的三级布局：
+    一级 顶栏 = 品牌 + 模块（工作台、领用管理…）+ 全局工具（扫码查找、待办、个人菜单）
+    二级 左侧栏 = 当前模块的功能，每项带一句话说明，可收起成图标栏
+    三级 页面内页签；打开过的页面在内容区上方以页签保留，切换不丢内容
+  -->
+  <div class="pc" :class="{ folded: collapsed }">
+    <header class="hd">
+      <a class="brand" href="/" title="回到首页" @click.prevent="onMenu('/')">
         <span class="logo">R</span>
-        <div v-show="!collapsed" class="brand-text">
-          <div class="brand-title">研发物料管家</div>
-          <div class="brand-sub">RMLM · 研发物料全生命周期</div>
-        </div>
-      </div>
-      <div class="quick" :class="{ mini: collapsed }">
-        <el-tooltip :disabled="!collapsed" content="新建申请" placement="right">
-          <el-button type="primary" class="new-btn" @click="onMenu('/apply')">
-            <el-icon><Plus /></el-icon><span v-show="!collapsed">新建申请</span>
-          </el-button>
-        </el-tooltip>
-      </div>
-      <el-scrollbar class="menu-wrap">
-        <el-menu :default-active="activeMenu" :default-openeds="openeds" :collapse="collapsed" :collapse-transition="false"
-          class="menu" @select="onMenu" @open="k => toggleGroup(k, true)" @close="k => toggleGroup(k, false)">
-          <el-sub-menu v-for="g in menu" :key="g.title" :index="g.title" popper-class="rmlm-nav-pop">
-            <template #title>
-              <el-icon><component :is="g.icon" /></el-icon>
-              <span class="gtitle">{{ g.title }}</span>
-              <span v-if="g.badge && !isOpen(g.title)" class="gdot">{{ g.badge }}</span>
-            </template>
-            <el-menu-item v-for="m in g.items" :key="m.path" :index="m.path">
-              <span class="item-title">{{ m.name }}</span>
-              <span v-if="m.badge" class="ibadge">{{ m.badge > 99 ? '99+' : m.badge }}</span>
-            </el-menu-item>
-          </el-sub-menu>
-        </el-menu>
-      </el-scrollbar>
-      <el-dropdown trigger="click" :placement="collapsed ? 'right-end' : 'top-start'" class="me-wrap" @command="onCommand">
-        <div class="me" :class="{ mini: collapsed }" :title="collapsed ? `${store.user?.name || ''} · ${roleText}` : undefined">
-          <span class="avatar">{{ initial }}</span>
-          <template v-if="!collapsed">
-            <span class="me-text">
-              <span class="me-name">{{ store.user?.name }}</span>
-              <span class="me-role">{{ roleText }}</span>
-            </span>
-            <el-icon class="me-caret"><MoreFilled /></el-icon>
+        <span class="brand-title">研发物料管家</span>
+      </a>
+      <nav class="mods" aria-label="功能模块">
+        <a v-for="m in modules" :key="m.key" class="mod" :class="{ on: m.key === sideModule?.key }" :href="m.items[0].path"
+          :aria-current="m.key === sideModule?.key ? 'page' : undefined" @click.prevent="openModule(m)">
+          <el-icon :size="16"><component :is="m.icon" /></el-icon>
+          <span>{{ m.title }}</span>
+          <i v-if="m.badge" class="mdot" :title="`${m.badge} 项待办`" />
+        </a>
+      </nav>
+      <div class="tools">
+        <el-input v-model="lookup" class="lookup" placeholder="扫码或输入 物料码 / 申请号 / 单据号" clearable @keyup.enter="doLookup">
+          <template #prefix><el-icon><Search /></el-icon></template>
+          <template #suffix>
+            <el-tooltip content="打开扫码页（摄像头 / 扫码枪）">
+              <el-icon class="cam" @click.stop="onMenu('/scan')"><Camera /></el-icon>
+            </el-tooltip>
           </template>
-        </div>
-        <template #dropdown>
-          <div class="me-card">
-            <span class="avatar lg">{{ initial }}</span>
-            <div class="card-main">
-              <div class="card-name">{{ store.user?.name }}</div>
-              <div class="card-line">账号 {{ store.user?.username }}</div>
-              <div class="card-tags">
-                <el-tag v-for="r in store.user?.role_names || []" :key="r" size="small" effect="plain">{{ r }}</el-tag>
-                <el-tag v-if="store.user?.frozen" size="small" type="danger">新领用已冻结</el-tag>
+        </el-input>
+        <el-tag v-if="store.user?.frozen" type="danger" effect="dark" size="small">新领用已冻结</el-tag>
+        <el-tooltip content="我的待办">
+          <el-badge :value="todoCount" :hidden="!todoCount" :max="99" class="bell">
+            <button type="button" class="hbtn" aria-label="我的待办" @click="onMenu('/todos')"><el-icon :size="18"><Bell /></el-icon></button>
+          </el-badge>
+        </el-tooltip>
+        <el-dropdown trigger="click" placement="bottom-end" @command="onCommand">
+          <button type="button" class="me" :title="`${store.user?.name || ''} · ${roleText}`">
+            <span class="avatar">{{ initial }}</span>
+            <span class="me-name">{{ store.user?.name }}</span>
+            <el-icon class="caret"><ArrowDown /></el-icon>
+          </button>
+          <template #dropdown>
+            <div class="me-card">
+              <span class="avatar lg">{{ initial }}</span>
+              <div class="card-main">
+                <div class="card-name">{{ store.user?.name }}</div>
+                <div class="card-line">账号 {{ store.user?.username }}<template v-if="store.user?.manager_name"> · 直属上级 {{ store.user.manager_name }}</template></div>
+                <div class="card-tags">
+                  <el-tag v-for="r in store.user?.role_names || []" :key="r" size="small" effect="plain">{{ r }}</el-tag>
+                  <el-tag v-if="store.user?.frozen" size="small" type="danger">新领用已冻结</el-tag>
+                </div>
               </div>
             </div>
-          </div>
-          <el-dropdown-menu>
-            <el-dropdown-item command="password" divided :icon="Lock">修改密码</el-dropdown-item>
-            <el-dropdown-item command="delegates" :icon="Switch">代理审核设置</el-dropdown-item>
-            <el-dropdown-item command="mobile" :icon="Iphone">切换到手机版</el-dropdown-item>
-            <el-dropdown-item command="logout" divided :icon="SwitchButton">退出登录</el-dropdown-item>
-          </el-dropdown-menu>
-        </template>
-      </el-dropdown>
-    </el-aside>
-    <el-container direction="vertical" class="body">
-      <el-header class="top">
-        <el-button text class="fold" :title="collapsed ? '展开菜单' : '收起菜单'" @click="setCollapsed(!collapsed)">
-          <el-icon :size="18"><component :is="collapsed ? 'Expand' : 'Fold'" /></el-icon>
-        </el-button>
-        <TabBar :group-of="groupOf" />
-        <div class="right">
-          <el-tag v-if="store.user?.frozen" type="danger" effect="dark" size="small">新领用已冻结</el-tag>
-          <el-tooltip content="扫码">
-            <el-button text circle class="ibtn" @click="onMenu('/scan')"><el-icon :size="18"><Camera /></el-icon></el-button>
-          </el-tooltip>
-          <el-tooltip content="我的待办">
-            <el-badge :value="todoCount" :hidden="!todoCount" :max="99" class="bell">
-              <el-button text circle class="ibtn" @click="onMenu('/todos')"><el-icon :size="18"><Bell /></el-icon></el-button>
-            </el-badge>
+            <el-dropdown-menu>
+              <el-dropdown-item command="password" divided :icon="Lock">修改密码</el-dropdown-item>
+              <el-dropdown-item command="delegates" :icon="Switch">代理审核设置</el-dropdown-item>
+              <el-dropdown-item command="mobile" :icon="Iphone">切换到手机版</el-dropdown-item>
+              <el-dropdown-item command="logout" divided :icon="SwitchButton">退出登录</el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
+      </div>
+    </header>
+
+    <div class="frame">
+      <aside class="side" :style="{ width: collapsed ? '64px' : '216px' }">
+        <div v-if="sideModule" class="side-head">
+          <template v-if="!collapsed">
+            <div class="side-title">{{ sideModule.title }}</div>
+            <div class="side-desc">{{ sideModule.desc }}</div>
+          </template>
+          <el-tooltip v-else :content="sideModule.title" placement="right">
+            <el-icon :size="18" class="side-icon"><component :is="sideModule.icon" /></el-icon>
           </el-tooltip>
         </div>
-      </el-header>
-      <el-main class="main">
-        <!-- 页签缓存：切换页签不重新加载，页面内容保留；关闭或刷新页签时释放（见 pageOf） -->
-        <router-view v-slot="{ Component, route: r }">
-          <transition name="page" mode="out-in">
-            <keep-alive :include="cached">
-              <component :is="pageOf(Component, tabKeyOf(r))" :key="pageName(tabKeyOf(r))" />
-            </keep-alive>
-          </transition>
-        </router-view>
-      </el-main>
-    </el-container>
-  </el-container>
+        <el-scrollbar class="side-scroll">
+          <nav class="items" :aria-label="sideModule?.title">
+            <el-tooltip v-for="it in sideModule?.items || []" :key="it.path" :disabled="!collapsed" placement="right"
+              :content="it.badge ? `${it.name}（${it.badge}）` : it.name">
+              <a class="item" :class="{ on: it.path === activeMenu }" :href="it.path" :aria-current="it.path === activeMenu ? 'page' : undefined"
+                @click.prevent="onMenu(it.path)">
+                <span class="ic"><el-icon :size="18"><component :is="it.icon" /></el-icon><i v-if="collapsed && it.badge" class="idot" /></span>
+                <span v-if="!collapsed" class="txt">
+                  <span class="nm">{{ it.name }}</span>
+                  <span class="ds">{{ it.desc }}</span>
+                </span>
+                <span v-if="!collapsed && it.badge" class="badge">{{ it.badge > 99 ? '99+' : it.badge }}</span>
+              </a>
+            </el-tooltip>
+          </nav>
+        </el-scrollbar>
+        <button type="button" class="fold" :title="collapsed ? '展开菜单' : '收起菜单'" @click="setCollapsed(!collapsed)">
+          <el-icon><component :is="collapsed ? 'DArrowRight' : 'DArrowLeft'" /></el-icon>
+          <span v-if="!collapsed">收起菜单</span>
+        </button>
+      </aside>
+
+      <section class="content">
+        <div class="tabstrip"><TabBar :group-of="groupOf" /></div>
+        <main class="main">
+          <!-- 页签缓存：切换页签不重新加载，页面内容保留；关闭或刷新页签时释放（见 pageOf） -->
+          <router-view v-slot="{ Component, route: r }">
+            <transition name="page" mode="out-in">
+              <keep-alive :include="cached">
+                <component :is="pageOf(Component, tabKeyOf(r))" :key="pageName(tabKeyOf(r))" />
+              </keep-alive>
+            </transition>
+          </router-view>
+        </main>
+      </section>
+    </div>
+  </div>
 </template>
 
 <script setup>
@@ -101,79 +118,73 @@ import { computed, defineComponent, h, markRaw, onMounted, onUnmounted, ref, wat
 import { useRoute, useRouter } from 'vue-router'
 import { Iphone, Lock, Switch, SwitchButton } from '@element-plus/icons-vue'
 import { api } from '../api'
-import { store, hasRole, setUser, logout } from '../store'
+import { store, setUser, logout } from '../store'
 import { loadDicts } from '../utils'
+import { PERSONAL, menuOf, moduleOf, visibleModules } from '../nav'
 import { tabs, findTab, visitTab, restoreTabs, resetTabs, tabKeyOf } from '../tabs'
 import TabBar from './TabBar.vue'
 
 const route = useRoute()
 const router = useRouter()
-const todoCount = computed(() => store.counts.tasks + store.counts.notices)
+const todoCount = computed(() => (store.counts.tasks || 0) + (store.counts.notices || 0))
 
-// 本机偏好（收起菜单、各分组展开状态）：读写失败时按默认显示
+// 本机偏好（收起菜单）：读写失败时按默认显示
 const PREF_KEY = 'rmlm_pc_nav'
 function readPref() { try { return JSON.parse(localStorage.getItem(PREF_KEY) || '{}') || {} } catch { return {} } }
-function savePref() { try { localStorage.setItem(PREF_KEY, JSON.stringify({ collapsed: collapsed.value, groups: groupState.value })) } catch { /* ignore */ } }
-const pref = readPref()
-const collapsed = ref(!!pref.collapsed)
-const groupState = ref(pref.groups || {})
-function setCollapsed(v) { collapsed.value = v; savePref() }
-function toggleGroup(k, open) { groupState.value = { ...groupState.value, [k]: open }; savePref() }
+const collapsed = ref(!!readPref().collapsed)
+function setCollapsed(v) {
+  collapsed.value = v
+  try { localStorage.setItem(PREF_KEY, JSON.stringify({ collapsed: v })) } catch { /* ignore */ }
+}
 
-const menu = computed(() => {
-  const u = store.user || { roles: [] }
-  const mgr = u.is_manager || (u.delegated_by || []).length
-  const groups = [
-    { title: '工作台', icon: 'Monitor', items: [
-      { path: '/', name: '首页' },
-      { path: '/todos', name: '我的待办', badge: todoCount.value },
-      { path: '/scan', name: '扫码' }
-    ] },
-    { title: '领用管理', icon: 'Document', items: [
-      { path: '/reqs', name: '领料申请' },
-      ...(mgr ? [{ path: '/approve', name: '待我审核' }] : []),
-      { path: '/ledger', name: '领用台账' },
-      ...(u.is_manager ? [{ path: '/team', name: '我的团队' }] : [])
-    ] }
-  ]
-  // 模块按 ERP 惯例划分：业务（领用、仓库作业）→ 财务（对账、冲销、报表）→ 基础数据 → 系统管理；没有可见菜单的分组不显示
-  const wh = []
-  if (hasRole('KEEPER')) wh.push({ path: '/issue', name: '出库开单' })
-  if (hasRole('KEEPER', 'FINANCE', 'WAREHOUSE', 'ADMIN')) wh.push({ path: '/erp', name: 'ERP 单据' })
-  if (hasRole('KEEPER', 'WAREHOUSE', 'ADMIN')) wh.push({ path: '/dispose', name: '退库与报废' })
-  groups.push({ title: '仓库作业', icon: 'Box', items: wh })
-  const fin = []
-  if (hasRole('KEEPER', 'FINANCE', 'ADMIN', 'DEPT_HEAD', 'VP')) fin.push({ path: '/recon', name: '对账与关账' })
-  if (hasRole('KEEPER', 'ADMIN', 'FINANCE')) fin.push({ path: '/reversals', name: '冲销' })
-  fin.push({ path: '/reports', name: '统计报表' })
-  groups.push({ title: '对账与报表', icon: 'Money', items: fin })
-  const base = []
-  if (hasRole('KEEPER', 'ADMIN', 'WAREHOUSE')) base.push({ path: '/master', name: '基础资料' })
-  base.push({ path: '/dicts', name: '数据字典' })
-  if (hasRole('KEEPER', 'ADMIN', 'FINANCE', 'DEPT_HEAD', 'VP', 'WAREHOUSE')) base.push({ path: '/history', name: '历史台账' })
-  groups.push({ title: '基础数据', icon: 'Coin', items: base })
-  if (hasRole('ADMIN')) groups.push({ title: '系统管理', icon: 'Setting', items: [{ path: '/users', name: '用户管理' }, { path: '/audit', name: '审计日志' }] })
-  const shown = groups.filter(g => g.items.length)
-  for (const g of shown) g.badge = g.items.reduce((n, m) => n + (m.badge || 0), 0)
-  return shown
+// ================================================================ 模块与功能
+
+const modules = computed(() => visibleModules())
+const currentKey = computed(() => tabKeyOf(route))
+const activeMenu = computed(() => menuOf(currentKey.value))
+/** 左侧栏显示的模块：当前页所属模块；个人设置等不属于模块的页面沿用上一个模块 */
+const lastModuleKey = ref('work')
+const routeModule = computed(() => moduleOf(currentKey.value, modules.value))
+watch(routeModule, m => { if (m) lastModuleKey.value = m.key }, { immediate: true })
+const sideModule = computed(() => routeModule.value
+  || modules.value.find(m => m.key === lastModuleKey.value) || modules.value[0] || null)
+
+/** 页签悬停提示「模块 / 页面」 */
+const groupOf = key => moduleOf(key, modules.value)?.title || (PERSONAL[key] ? '个人设置' : '')
+
+/** 各模块最近一次打开的页面：点模块时回到那里（页签已关闭则打开模块的第一个功能） */
+const lastPathOf = {}
+watch(() => route.fullPath, () => {
+  const m = routeModule.value
+  if (m && route.matched[0]?.path === '/') lastPathOf[m.key] = currentKey.value
 })
+function openModule(m) {
+  const key = lastPathOf[m.key]
+  onMenu(key && findTab(key) ? key : m.items[0].path)
+}
 
-// 详情、新建等不在菜单里的页面，高亮其所属的菜单项
-const MENU_OF = { '/req/:id': '/reqs', '/apply': '/reqs', '/line/:id': '/ledger' }
-const menuOf = key => MENU_OF[key] || key
-const activeMenu = computed(() => menuOf(tabKeyOf(route)))
-const groupOf = key => menu.value.find(g => g.items.some(m => m.path === menuOf(key)))?.title || ''
-const currentGroup = computed(() => groupOf(tabKeyOf(route)))
-// 默认展开：工作台、领用管理、当前页所在分组；用户手动展开 / 收起过的分组按其选择
-const isOpen = t => t in groupState.value ? groupState.value[t] : (t === '工作台' || t === '领用管理' || t === currentGroup.value)
-const openeds = computed(() => menu.value.map(g => g.title).filter(isOpen))
 const roleText = computed(() => {
   const r = store.user?.role_names || []
   return r.length > 1 ? `${r[0]} 等 ${r.length} 个角色` : (r[0] || '')
 })
 const initial = computed(() => (store.user?.name || '?').trim().slice(-2))
 
-// ================================================================ 顶栏页签
+// ================================================================ 扫码查找
+
+/** 顶栏查找：物料码 / 申请号直接打开详情；ERP 单据号、仓储条码、库位码到扫码页列出结果 */
+const lookup = ref('')
+async function doLookup() {
+  const code = lookup.value.trim()
+  if (!code) return onMenu('/scan')
+  let r
+  try { r = await api.get(`/api/scan/${encodeURIComponent(code)}`) } catch { return }
+  lookup.value = ''
+  if (r.kind === 'line') router.push(`/line/${r.line_id}`)
+  else if (r.kind === 'req') router.push(`/req/${r.req_id}`)
+  else router.push({ path: '/scan', query: { code } })
+}
+
+// ================================================================ 页签
 
 /** F5 恢复页签时只留还存在的电脑版页面 */
 restoreTabs(store.user?.id, t => {
@@ -249,62 +260,92 @@ onUnmounted(() => { clearInterval(timer); window.removeEventListener('resize', o
 </script>
 
 <style scoped>
-.pc { height: 100vh; overflow: hidden; }
-.side { background: #0f2741; color: #cfd8e3; display: flex; flex-direction: column; transition: width .18s ease; overflow: hidden; }
-.brand { display: flex; align-items: center; gap: 10px; padding: 14px 16px; color: #fff; flex-shrink: 0; white-space: nowrap; }
-.brand.mini { padding: 14px 0; justify-content: center; }
-.logo { width: 30px; height: 30px; flex-shrink: 0; border-radius: 8px; background: linear-gradient(135deg, #1f8fff, #0b5cb8); display: grid; place-items: center; font-weight: 700; }
-.brand-title { font-weight: 700; font-size: 15px; }
-.brand-sub { font-size: 11px; color: #7f93ab; margin-top: 2px; }
-.quick { padding: 2px 14px 10px; flex-shrink: 0; }
-.quick.mini { padding: 2px 10px 10px; }
-.new-btn { width: 100%; height: 36px; --el-button-bg-color: #1f8fff; --el-button-border-color: #1f8fff; }
-.new-btn .el-icon + span { margin-left: 6px; }
-.menu-wrap { flex: 1; min-height: 0; }
-.menu { border-right: none; background: transparent;
-  --el-menu-bg-color: transparent; --el-menu-text-color: #cfd8e3; --el-menu-hover-bg-color: #18395c;
-  --el-menu-active-color: #fff; --el-menu-item-height: 44px; }
-.menu :deep(.el-sub-menu__title) { height: 44px; line-height: 44px; }
-.menu :deep(.el-sub-menu .el-menu-item) { height: 40px; line-height: 40px; padding-left: 52px !important; font-size: 13.5px; }
-.menu :deep(.el-menu-item.is-active) { background: #1f5fa8; }
-.menu :deep(.el-sub-menu.is-active > .el-sub-menu__title) { color: #fff; }
-.gtitle { flex: 1; }
-.gdot { background: #f56c6c; color: #fff; font-size: 11px; line-height: 16px; padding: 0 6px; border-radius: 8px; margin-right: 18px; }
-.item-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.ibadge { flex: none; margin-left: 6px; background: #f56c6c; color: #fff; font-size: 11px; line-height: 18px; min-width: 18px; text-align: center; padding: 0 5px; border-radius: 9px; }
+.pc { height: 100vh; display: flex; flex-direction: column; overflow: hidden; background: var(--bg); }
 
-.me-wrap { display: block; flex: none; border-top: 1px solid #1b3a5c; }
-.me { display: flex; align-items: center; gap: 10px; padding: 12px 14px; cursor: pointer; color: #e2e8f0; transition: background .15s; outline: none; }
-.me:hover { background: #18395c; }
-.me.mini { justify-content: center; padding: 12px 0; }
-.avatar { flex: none; width: 32px; height: 32px; border-radius: 50%; background: #1f8fff; color: #fff; font-size: 12.5px; font-weight: 700; display: grid; place-items: center; }
+/* ---------------- 一级：顶栏 */
+.hd { flex: none; height: 56px; display: flex; align-items: center; gap: 8px; padding: 0 16px 0 0; background: #0f2741; color: #fff; }
+.brand { flex: none; width: 216px; height: 100%; display: flex; align-items: center; gap: 10px; padding: 0 18px; color: #fff; }
+.folded .brand { width: auto; }
+.logo { width: 30px; height: 30px; flex: none; border-radius: 8px; background: linear-gradient(135deg, #1f8fff, #0b5cb8);
+  display: grid; place-items: center; font-weight: 700; }
+.brand-title { font-weight: 700; font-size: 16px; white-space: nowrap; letter-spacing: .5px; }
+.mods { flex: 1; min-width: 0; height: 100%; display: flex; align-items: stretch; gap: 2px; overflow-x: auto; scrollbar-width: none; }
+.mods::-webkit-scrollbar { display: none; }
+.mod { position: relative; flex: none; display: flex; align-items: center; gap: 6px; padding: 0 14px; color: #b8c6d8; font-size: 14.5px;
+  white-space: nowrap; transition: color .15s, background .15s; }
+.mod:hover { color: #fff; background: rgba(255, 255, 255, .06); }
+.mod.on { color: #fff; font-weight: 600; background: rgba(31, 143, 255, .16); }
+.mod.on::after { content: ''; position: absolute; left: 12px; right: 12px; bottom: 0; height: 3px; border-radius: 3px 3px 0 0; background: #3b9bff; }
+.mdot { position: absolute; top: 14px; right: 6px; width: 7px; height: 7px; border-radius: 50%; background: #f56c6c; }
+.tools { flex: none; display: flex; align-items: center; gap: 8px; }
+.lookup { width: 290px; }
+.lookup :deep(.el-input__wrapper) { background: rgba(255, 255, 255, .1); box-shadow: none; border-radius: 16px; }
+.lookup :deep(.el-input__wrapper.is-focus) { background: #fff; }
+.lookup :deep(.el-input__inner) { color: #fff; }
+.lookup :deep(.is-focus .el-input__inner) { color: var(--ink); }
+.lookup :deep(.el-input__inner::placeholder) { color: #8ea2ba; }
+.cam { cursor: pointer; color: #8ea2ba; }
+.cam:hover { color: var(--brand); }
+.hbtn { width: 36px; height: 36px; border: 0; border-radius: 8px; background: none; color: #cfd8e3; cursor: pointer; display: grid; place-items: center; }
+.hbtn:hover { background: rgba(255, 255, 255, .1); color: #fff; }
+.bell :deep(.el-badge__content) { top: 6px; right: 8px; border: 0; }
+.me { display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 8px 0 4px; border: 0; border-radius: 20px; background: none;
+  color: #e2e8f0; cursor: pointer; font: inherit; }
+.me:hover { background: rgba(255, 255, 255, .1); }
+.avatar { flex: none; width: 30px; height: 30px; border-radius: 50%; background: #1f8fff; color: #fff; font-size: 12px; font-weight: 700; display: grid; place-items: center; }
 .avatar.lg { width: 40px; height: 40px; font-size: 14px; }
-.me-text { display: flex; flex-direction: column; line-height: 1.25; min-width: 0; flex: 1; }
-.me-name { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.me-role { font-size: 11px; color: #7f93ab; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.me-caret { color: #5f7690; flex: none; }
-.me-card { display: flex; gap: 12px; padding: 14px 16px 10px; min-width: 240px; max-width: 320px; }
+.me-name { font-size: 13px; max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.caret { color: #8ea2ba; }
+.me-card { display: flex; gap: 12px; padding: 14px 16px 10px; min-width: 260px; max-width: 340px; }
 .card-main { min-width: 0; }
 .card-name { font-weight: 600; font-size: 14px; color: var(--ink); }
 .card-line { font-size: 12px; color: var(--ink2); margin-top: 2px; }
 .card-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; }
 
-.body { min-width: 0; }
-.top { height: 48px; background: #fff; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 8px; padding: 0 16px 0 8px; }
-.fold { flex: none; width: 32px; height: 32px; padding: 0; color: var(--ink2); }
-.right { display: flex; align-items: center; gap: 4px; flex: none; }
-.ibtn { width: 34px; height: 34px; color: var(--ink2); }
-.bell :deep(.el-badge__content) { top: 6px; right: 10px; }
-.main { background: var(--bg); padding: 20px; overflow: auto; }
+/* ---------------- 二级：左侧功能栏 */
+.frame { flex: 1; min-height: 0; display: flex; }
+.side { flex: none; display: flex; flex-direction: column; background: #fff; border-right: 1px solid var(--line); transition: width .18s ease; overflow: hidden; }
+.side-head { flex: none; padding: 16px 18px 12px; border-bottom: 1px solid var(--line); }
+.folded .side-head { padding: 14px 0 12px; text-align: center; }
+.side-title { font-size: 15px; font-weight: 700; color: var(--ink); }
+.side-desc { font-size: 12px; color: var(--ink2); margin-top: 3px; line-height: 1.4; }
+.side-icon { color: var(--brand); }
+.side-scroll { flex: 1; min-height: 0; }
+.items { padding: 8px; display: flex; flex-direction: column; gap: 2px; }
+.item { position: relative; display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 8px; color: var(--ink); transition: background .12s, color .12s; }
+.folded .item { justify-content: center; padding: 10px 0; }
+.item:hover { background: #f2f6fb; }
+.item.on { background: #e8f1fb; color: var(--brand); }
+.item.on::before { content: ''; position: absolute; left: 0; top: 10px; bottom: 10px; width: 3px; border-radius: 2px; background: var(--brand); }
+.ic { position: relative; flex: none; width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; background: #f2f5f9; color: #5a6b7d; }
+.item.on .ic { background: #d6e7fa; color: var(--brand); }
+.idot { position: absolute; top: -2px; right: -2px; width: 8px; height: 8px; border-radius: 50%; background: #f56c6c; border: 2px solid #fff; }
+.txt { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.3; }
+.nm { font-size: 14px; font-weight: 600; }
+.ds { font-size: 11.5px; color: var(--ink2); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.item.on .ds { color: #4f7fb5; }
+.badge { flex: none; background: #f56c6c; color: #fff; font-size: 11px; line-height: 18px; min-width: 18px; text-align: center; padding: 0 5px; border-radius: 9px; }
+.fold { flex: none; display: flex; align-items: center; justify-content: center; gap: 6px; height: 40px; margin: 0; border: 0; border-top: 1px solid var(--line);
+  background: none; color: var(--ink2); font: inherit; font-size: 12.5px; cursor: pointer; }
+.fold:hover { color: var(--brand); background: #f7f9fc; }
+
+/* ---------------- 内容区：页签 + 页面 */
+.content { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.tabstrip { flex: none; height: 42px; display: flex; align-items: center; padding: 0 12px; background: #fff; border-bottom: 1px solid var(--line); }
+.main { flex: 1; min-height: 0; overflow: auto; padding: 20px; }
+
+@media (max-width: 1360px) {
+  .lookup { width: 220px; }
+  .me-name { display: none; }
+}
+@media (max-width: 1180px) {
+  .brand { width: auto; }
+  .brand-title { display: none; }
+  .mod { padding: 0 10px; }
+}
 </style>
 
 <style>
-/* 收起菜单时分组弹出的子菜单（挂在 body 下，不能用 scoped）：与侧栏同色 */
-.rmlm-nav-pop .el-menu { background: #0f2741; --el-menu-bg-color: #0f2741; --el-menu-text-color: #cfd8e3;
-  --el-menu-hover-bg-color: #18395c; --el-menu-active-color: #fff; --el-menu-item-height: 38px; padding: 4px 0; min-width: 150px; }
-.rmlm-nav-pop .el-menu-item { font-size: 13.5px; }
-.rmlm-nav-pop .el-menu-item.is-active { background: #1f5fa8; }
-.rmlm-nav-pop .ibadge { margin-left: 8px; background: #f56c6c; color: #fff; font-size: 11px; line-height: 18px; padding: 0 5px; border-radius: 9px; }
 /* 页面切换过渡 */
 .page-enter-active, .page-leave-active { transition: opacity .15s ease, transform .15s ease; }
 .page-enter-from { opacity: 0; transform: translateY(6px); }

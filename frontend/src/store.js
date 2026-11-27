@@ -8,7 +8,7 @@ export const store = reactive({
   token: (() => { try { return localStorage.getItem('rmlm_token') || '' } catch { return '' } })(),
   user: load(),
   dicts: {},
-  counts: { tasks: 0, notices: 0 }
+  counts: { tasks: 0, notices: 0, by_kind: {} }
 })
 
 export function setLogin(token, user) {

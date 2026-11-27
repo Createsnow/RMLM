@@ -1,7 +1,7 @@
 <template>
   <div>
     <div class="page-head">
-      <h2>冲销</h2><span class="sub">领料专员在物料详情的事件流水上发起，IT（系统管理员）复核后生效；发起人与复核人不能是同一人</span>
+      <h2 v-if="!embedded">冲销</h2><span class="sub">领料专员在物料详情的事件流水上发起，IT（系统管理员）复核后生效；发起人与复核人不能是同一人</span>
       <span class="grow" />
       <el-radio-group v-model="status" @change="load">
         <el-radio-button value="PENDING">待复核</el-radio-button>
@@ -33,6 +33,7 @@ import { api } from '../api'
 import { hasRole } from '../store'
 import { useRefresh } from '../useRefresh'
 
+defineProps({ embedded: Boolean })
 const rows = ref([])
 const status = ref('PENDING')
 async function load() { rows.value = await api.get(`/api/reversals?status=${status.value}`) }

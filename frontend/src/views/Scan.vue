@@ -92,7 +92,7 @@
 </template>
 
 <script setup>
-import { computed, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { api } from '../api'
@@ -114,6 +114,8 @@ async function onScan(code) {
   if (r.kind === 'req') return router.push(`${p.value}/req/${r.req_id}`)
   res.value = r
 }
+// 顶栏「扫码查找」带过来的单据号 / 条码 / 库位码：打开页面时直接查
+onMounted(() => { if (route.query.code) onScan(String(route.query.code)) })
 const signable = computed(() => (res.value?.rows || []).flatMap(r => r.lines.filter(l => l.can_sign)
   .map(l => ({ ...l, line_no: r.line_no, material_code: r.material_code, material: r.material }))))
 const batch = reactive({ visible: false, ids: [], codes: [], photos: [], note: '', saving: false })

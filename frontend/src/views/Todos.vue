@@ -7,6 +7,13 @@
         <el-radio-button value="DONE">已完成</el-radio-button>
       </el-radio-group>
     </div>
+    <!-- 按类型筛选：一眼看出各类事项有几件 -->
+    <div v-if="kinds.length > 1 || kind" class="kinds">
+      <button type="button" class="kchip" :class="{ on: !kind }" @click="kind = ''">全部 <b>{{ all.length }}</b></button>
+      <button v-for="k in kinds" :key="k.kind" type="button" class="kchip" :class="{ on: kind === k.kind }" @click="kind = k.kind">
+        {{ TODO_KINDS[k.kind] || k.kind }} <b>{{ k.n }}</b>
+      </button>
+    </div>
     <div v-if="transferId" class="card">
       <h3>确认接收转交</h3>
       <div class="muted" style="margin-bottom: 10px">确认后您成为持有人，超期责任随之转移。</div>
@@ -40,11 +47,18 @@ const route = useRoute()
 const router = useRouter()
 const mobile = computed(() => route.path.startsWith('/m'))
 const state = ref('OPEN')
-const rows = ref([])
+const all = ref([])
+const kind = ref(typeof route.query.kind === 'string' ? route.query.kind : '')
+const kinds = computed(() => {
+  const m = new Map()
+  for (const t of all.value) m.set(t.kind, (m.get(t.kind) || 0) + 1)
+  return [...m].map(([k, n]) => ({ kind: k, n }))
+})
+const rows = computed(() => kind.value ? all.value.filter(t => t.kind === kind.value) : all.value)
 const transferId = computed(() => route.query.transfer)
 
 async function load() {
-  rows.value = await api.get(`/api/todos?state=${state.value}`)
+  all.value = await api.get(`/api/todos?state=${state.value}`)
   store.counts = await api.get('/api/todos/count')
 }
 async function read(t) { await api.post(`/api/todos/${t.id}/read`); load() }
@@ -65,4 +79,10 @@ useRefresh(load)
 .todo { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--line); cursor: pointer; }
 .todo:hover { background: #f7f9fc; }
 .tt { flex: 1; font-size: 13.5px; }
+.kinds { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.kchip { border: 1px solid var(--line); background: #fff; border-radius: 16px; padding: 4px 12px; font: inherit; font-size: 13px; color: var(--ink); cursor: pointer; }
+.kchip b { margin-left: 2px; color: var(--brand); font-variant-numeric: tabular-nums; }
+.kchip:hover { border-color: #a9c8ec; }
+.kchip.on { background: var(--brand); border-color: var(--brand); color: #fff; }
+.kchip.on b { color: #fff; }
 </style>

@@ -487,8 +487,14 @@ def todos(state: str = "OPEN", user: User = Depends(current_user), db: Session =
 
 @router.get("/todos/count")
 def todo_count(user: User = Depends(current_user), db: Session = Depends(get_db)):
-    q = select(func.count()).select_from(Todo).where(Todo.user_id == user.id, Todo.state == "OPEN")
-    return {"tasks": db.scalar(q.where(Todo.is_notice.is_(False))), "notices": db.scalar(q.where(Todo.is_notice.is_(True)))}
+    """未完成待办数；by_kind 为各类待办（不含通知）的数量，电脑版侧栏、工作台按此在对应功能上标数字。"""
+    rows = db.execute(select(Todo.kind, Todo.is_notice, func.count()).where(Todo.user_id == user.id, Todo.state == "OPEN")
+                      .group_by(Todo.kind, Todo.is_notice)).all()
+    by_kind: dict[str, int] = {}
+    for kind, is_notice, n in rows:
+        if not is_notice:
+            by_kind[kind] = by_kind.get(kind, 0) + n
+    return {"tasks": sum(by_kind.values()), "notices": sum(n for _, is_notice, n in rows if is_notice), "by_kind": by_kind}
 
 
 @router.post("/todos/{tid}/read")
