@@ -250,6 +250,87 @@ def test_wecom_contact_sync(org, ref, wx):
     assert org.ok(org.get("admin", "/api/admin/wecom/status"))["last_result"]["blocked"] == 1
 
 
+def _wx_api(calls, contact_secret="contact-s", list_id_error=None):
+    """模拟企微通讯录接口。和真实规则一致：user/list_id 只认通讯录同步 Secret，应用 Secret 调用返回 48002。"""
+    members = {2: ["zhang", "li"], 3: ["li", "wang"], 9: ["outsider"]}  # li 同时在两个部门；9 不在同步范围
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path, q = request.url.path, dict(request.url.params)
+        calls.append(path.removeprefix("/cgi-bin/"))
+        if path.endswith("/gettoken"):
+            return httpx.Response(200, json={"errcode": 0, "access_token": "tok-" + q["corpsecret"], "expires_in": 7200})
+        secret = q["access_token"].removeprefix("tok-")
+        if path.endswith("/department/simplelist"):
+            return httpx.Response(200, json={"errcode": 0, "department_id": [{"id": 1}, {"id": 2}, {"id": 3}]})
+        if path.endswith("/user/list_id"):
+            if list_id_error:
+                return httpx.Response(200, json={"errcode": list_id_error, "errmsg": "not allow to access from your ip"})
+            if secret != contact_secret:
+                return httpx.Response(200, json={"errcode": 48002, "errmsg": "api forbidden"})
+            rows = [{"userid": u, "department": d} for d, us in members.items() for u in us]
+            if not json.loads(request.content).get("cursor"):
+                return httpx.Response(200, json={"errcode": 0, "dept_user": rows[:3], "next_cursor": "page2"})
+            return httpx.Response(200, json={"errcode": 0, "dept_user": rows[3:]})
+        if path.endswith("/user/simplelist"):
+            users = members.get(int(q["department_id"]), [])
+            return httpx.Response(200, json={"errcode": 0, "userlist": [{"userid": u, "name": u} for u in users]})
+        if path.endswith("/user/get"):
+            return httpx.Response(200, json={"errcode": 0, "userid": q["userid"], "name": "企微" + q["userid"], "status": 1})
+        raise AssertionError(f"未模拟的接口 {path}")
+    return httpx.MockTransport(handler)
+
+
+@pytest.fixture
+def wx_client(monkeypatch):
+    monkeypatch.setattr(wecom.WeComClient, "_tokens", {})
+    monkeypatch.setattr(settings, "wecom_contact_secret", "")
+
+    def make(calls, contact_secret="", **kw):
+        return wecom.WeComClient("ww-test", "1000002", "app-s", contact_secret=contact_secret,
+                                 transport=_wx_api(calls, **kw))
+    return make
+
+
+def test_wecom_user_ids_app_secret_lists_by_department(wx_client):
+    """没配通讯录同步 Secret：不调 list_id（必定 48002），逐个部门取成员并去重。"""
+    calls = []
+    assert wx_client(calls).user_ids({2, 3}) == ["zhang", "li", "wang"]
+    assert "user/list_id" not in calls and calls.count("user/simplelist") == 2
+
+
+def test_wecom_user_ids_contact_secret_uses_list_id(wx_client):
+    calls = []
+    assert wx_client(calls, contact_secret="contact-s").user_ids({2, 3}) == ["zhang", "li", "wang"]
+    assert calls.count("user/list_id") == 2 and "user/simplelist" not in calls  # 两页游标
+
+
+def test_wecom_user_ids_falls_back_on_48002(wx_client):
+    """WECOM_CONTACT_SECRET 填成了某个应用的 Secret：list_id 返回 48002，退回逐个部门获取。"""
+    calls = []
+    assert wx_client(calls, contact_secret="other-app-s").user_ids({2, 3}) == ["zhang", "li", "wang"]
+    assert calls.count("user/list_id") == 1 and calls.count("user/simplelist") == 2
+
+
+def test_wecom_user_ids_other_errors_not_swallowed(wx_client):
+    calls = []
+    with pytest.raises(wecom.WeComError) as e:
+        wx_client(calls, contact_secret="contact-s", list_id_error=60020).user_ids({2, 3})
+    assert e.value.code == 60020 and "user/simplelist" not in calls
+
+
+def test_wecom_sync_with_app_secret_only(org, wx_client, monkeypatch):
+    """只配应用 Secret 时整条同步能跑通（以前第二步 list_id 返回 48002，同步失败）。"""
+    monkeypatch.setattr(settings, "wecom_root_dept", 1)
+    calls = []
+    with dbmod.SessionLocal() as db:
+        st = wecom.run_sync(db, wx_client(calls))
+        db.commit()
+        names = set(db.scalars(select(User.name).where(User.wecom_userid.is_not(None))))
+    assert st["seen"] == 3 and st["created"] == 3
+    assert names == {"企微zhang", "企微li", "企微wang"}
+    assert "user/list_id" not in calls
+
+
 def test_wecom_login(org, ref, wx):
     assert org.c.get("/api/auth/config").json() == {"wecom": True, "wms": False}
     u = org.c.get("/api/auth/wecom/url", params={"next": "/m/req/5"}).json()

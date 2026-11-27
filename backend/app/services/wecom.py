@@ -34,6 +34,7 @@ log = logging.getLogger("rmlm.wecom")
 JOB = "wecom_contacts"
 MAX_TRIES = 3
 TOKEN_ERRORS = {40014, 42001}  # access_token 无效 / 过期
+API_FORBIDDEN = 48002  # 该 Secret 无权调用此接口
 STATUS_ACTIVE, STATUS_DISABLED, STATUS_UNACTIVATED, STATUS_QUIT = 1, 2, 4, 5
 
 
@@ -113,13 +114,35 @@ class WeComClient:
             raise WeComError("不是本企业成员，无法登录")
         return uid
 
-    # -- 通讯录（用通讯录同步 Secret，只读）--
+    # -- 通讯录（只读；有通讯录同步 Secret 用它，没有用应用 Secret）--
     def department_ids(self, root: int) -> set[int]:
         data = self.call("GET", "/cgi-bin/department/simplelist", self.contact_secret, params={"id": root})
         return {int(d["id"]) for d in data.get("department_id", [])} | {root}
 
     def user_ids(self, departments: set[int] | None = None) -> list[str]:
-        """获取成员 ID 列表（分页游标）；给了部门集合时只保留属于这些部门的人。"""
+        """获取成员 ID 列表；给了部门集合时只要这些部门的人。
+
+        「获取成员ID列表」（user/list_id）只认通讯录同步 Secret，应用 Secret 调用返回 48002。
+        所以没配通讯录同步 Secret 时，直接逐个部门「获取部门成员」（user/simplelist，只含应用可见范围内的人）；
+        配了但 list_id 仍返回 48002（比如填的其实是某个应用的 Secret）时，也退回逐个部门获取。
+        """
+        if self.contact_secret != self.secret:
+            try:
+                return self._user_ids_by_cursor(departments)
+            except WeComError as e:
+                if e.code != API_FORBIDDEN:
+                    raise
+                log.warning("user/list_id 返回 48002（WECOM_CONTACT_SECRET 不是通讯录同步 Secret？），改为逐个部门获取成员")
+        return self._user_ids_by_department(departments if departments is not None else self.department_ids(1))
+
+    def _user_ids_by_department(self, departments: set[int]) -> list[str]:
+        out = []
+        for d in sorted(departments):
+            data = self.call("GET", "/cgi-bin/user/simplelist", self.contact_secret, params={"department_id": d})
+            out.extend(row["userid"] for row in data.get("userlist", []))
+        return list(dict.fromkeys(out))
+
+    def _user_ids_by_cursor(self, departments: set[int] | None) -> list[str]:
         out, cursor = [], ""
         while True:
             body = {"limit": 10000}

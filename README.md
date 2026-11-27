@@ -135,7 +135,7 @@ RMLM_DATABASE_URL="mysql+pymysql://rmlm:密码@127.0.0.1:3306/rmlm_test?charset=
 | `K3_LOGIN_TIMEOUT` / `K3_QUERY_TIMEOUT` / `K3_VIEW_TIMEOUT` | 金蝶登录 / 查询 / 查看单据超时（秒）；旧的 `K3_TIMEOUT` 仍可用，作查询超时默认值 | 30 / 120 / 60 |
 | `K3_PAGE_RETRIES` / `K3_PAGE_RETRY_SECONDS` | 金蝶分页查询失败（超时、断连、5xx）重试次数 / 间隔（秒） | 3 / 10 |
 | `WECOM_CORP_ID` / `WECOM_AGENT_ID` / `WECOM_SECRET` | 企业微信自建应用。三项都填才启用企微登录和推送 | 空 |
-| `WECOM_CONTACT_SECRET` / `WECOM_ROOT_DEPT` | 通讯录同步 Secret（只读，不填用应用 Secret）/ 同步的根部门 | 空 / 1 |
+| `WECOM_CONTACT_SECRET` / `WECOM_ROOT_DEPT` | 通讯录同步 Secret（只读；不填用应用 Secret，按部门读取应用可见范围内的成员）/ 同步的根部门 | 空 / 1 |
 | `WMS_BASE_URL` / `WMS_TOKEN` | 仓储系统接口地址 / 令牌。两项都填才启用（签收扫仓储条码、拆分向仓储申请新码） | 空 |
 | `WMS_TIMEOUT` | 调用仓储接口的超时（秒） | 10 |
 
