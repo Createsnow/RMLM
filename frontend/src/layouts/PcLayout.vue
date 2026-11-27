@@ -1,8 +1,8 @@
 <template>
   <!--
     电脑版框架，按 ERP 通行的三级布局：
-    一级 顶栏 = 品牌 + 模块（工作台、领用管理…）+ 全局工具（扫码查找、待办、个人菜单）
-    二级 左侧栏 = 当前模块的功能，每项带一句话说明，可收起成图标栏
+    一级 顶栏 = 品牌 + 模块（工作台、领用管理…）+ 全局工具（扫码查找、待办）+ 右上角当前时间
+    二级 左侧栏 = 当前模块的功能，每项带一句话说明，可收起成图标栏（按钮在页签栏最左）；左下角为当前账号与个人菜单
     三级 页面内页签；打开过的页面在内容区上方以页签保留，切换不丢内容
   -->
   <div class="pc" :class="{ folded: collapsed }">
@@ -34,32 +34,10 @@
             <button type="button" class="hbtn" aria-label="我的待办" @click="onMenu('/todos')"><el-icon :size="18"><Bell /></el-icon></button>
           </el-badge>
         </el-tooltip>
-        <el-dropdown trigger="click" placement="bottom-end" @command="onCommand">
-          <button type="button" class="me" :title="`${store.user?.name || ''} · ${roleText}`">
-            <span class="avatar">{{ initial }}</span>
-            <span class="me-name">{{ store.user?.name }}</span>
-            <el-icon class="caret"><ArrowDown /></el-icon>
-          </button>
-          <template #dropdown>
-            <div class="me-card">
-              <span class="avatar lg">{{ initial }}</span>
-              <div class="card-main">
-                <div class="card-name">{{ store.user?.name }}</div>
-                <div class="card-line">账号 {{ store.user?.username }}<template v-if="store.user?.manager_name"> · 直属上级 {{ store.user.manager_name }}</template></div>
-                <div class="card-tags">
-                  <el-tag v-for="r in store.user?.role_names || []" :key="r" size="small" effect="plain">{{ r }}</el-tag>
-                  <el-tag v-if="store.user?.frozen" size="small" type="danger">新领用已冻结</el-tag>
-                </div>
-              </div>
-            </div>
-            <el-dropdown-menu>
-              <el-dropdown-item command="password" divided :icon="Lock">修改密码</el-dropdown-item>
-              <el-dropdown-item command="delegates" :icon="Switch">代理审核设置</el-dropdown-item>
-              <el-dropdown-item command="mobile" :icon="Iphone">切换到手机版</el-dropdown-item>
-              <el-dropdown-item command="logout" divided :icon="SwitchButton">退出登录</el-dropdown-item>
-            </el-dropdown-menu>
-          </template>
-        </el-dropdown>
+        <div class="clock" :title="`${clock.date} ${clock.time}`">
+          <span class="ck-time">{{ clock.time }}</span>
+          <span class="ck-date">{{ clock.date }}</span>
+        </div>
       </div>
     </header>
 
@@ -90,14 +68,47 @@
             </el-tooltip>
           </nav>
         </el-scrollbar>
-        <button type="button" class="fold" :title="collapsed ? '展开菜单' : '收起菜单'" @click="setCollapsed(!collapsed)">
-          <el-icon><component :is="collapsed ? 'DArrowRight' : 'DArrowLeft'" /></el-icon>
-          <span v-if="!collapsed">收起菜单</span>
-        </button>
+        <!-- 左下角：当前账号，点开为个人菜单 -->
+        <el-dropdown trigger="click" :placement="collapsed ? 'right-end' : 'top-start'" class="me-wrap" @command="onCommand">
+          <button type="button" class="me" :class="{ mini: collapsed }" :title="`${store.user?.name || ''} · ${roleText}`">
+            <span class="avatar">{{ initial }}</span>
+            <span v-if="!collapsed" class="me-text">
+              <span class="me-name">{{ store.user?.name }}</span>
+              <span class="me-role">{{ roleText }}</span>
+            </span>
+            <el-icon v-if="!collapsed" class="caret"><MoreFilled /></el-icon>
+          </button>
+          <template #dropdown>
+            <div class="me-card">
+              <span class="avatar lg">{{ initial }}</span>
+              <div class="card-main">
+                <div class="card-name">{{ store.user?.name }}</div>
+                <div class="card-line">账号 {{ store.user?.username }}<template v-if="store.user?.manager_name"> · 直属上级 {{ store.user.manager_name }}</template></div>
+                <div class="card-tags">
+                  <el-tag v-for="r in store.user?.role_names || []" :key="r" size="small" effect="plain">{{ r }}</el-tag>
+                  <el-tag v-if="store.user?.frozen" size="small" type="danger">新领用已冻结</el-tag>
+                </div>
+              </div>
+            </div>
+            <el-dropdown-menu>
+              <el-dropdown-item command="password" divided :icon="Lock">修改密码</el-dropdown-item>
+              <el-dropdown-item command="delegates" :icon="Switch">代理审核设置</el-dropdown-item>
+              <el-dropdown-item command="mobile" :icon="Iphone">切换到手机版</el-dropdown-item>
+              <el-dropdown-item command="logout" divided :icon="SwitchButton">退出登录</el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
       </aside>
 
       <section class="content">
-        <div class="tabstrip"><TabBar :group-of="groupOf" /></div>
+        <div class="tabstrip">
+          <el-tooltip :content="collapsed ? '展开菜单' : '收起菜单'">
+            <button type="button" class="fold" :aria-label="collapsed ? '展开菜单' : '收起菜单'" @click="setCollapsed(!collapsed)">
+              <el-icon :size="18"><component :is="collapsed ? 'Expand' : 'Fold'" /></el-icon>
+            </button>
+          </el-tooltip>
+          <TabBar :group-of="groupOf" />
+        </div>
         <main class="main">
           <!-- 页签缓存：切换页签不重新加载，页面内容保留；关闭或刷新页签时释放（见 pageOf） -->
           <router-view v-slot="{ Component, route: r }">
@@ -169,6 +180,18 @@ const roleText = computed(() => {
 })
 const initial = computed(() => (store.user?.name || '?').trim().slice(-2))
 
+// ================================================================ 顶栏右上角时间（本机时间，每秒走）
+
+const now = ref(new Date())
+const pad = n => String(n).padStart(2, '0')
+const clock = computed(() => {
+  const d = now.value
+  return {
+    time: `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`,
+    date: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} 星期${'日一二三四五六'[d.getDay()]}`
+  }
+})
+
 // ================================================================ 扫码查找
 
 /** 顶栏查找：物料码 / 申请号直接打开详情；ERP 单据号、仓储条码、库位码到扫码页列出结果 */
@@ -238,7 +261,7 @@ function onCommand(cmd) {
   else if (cmd === 'logout') { resetTabs(); logout() }
 }
 
-let timer
+let timer, clockTimer
 async function refreshCounts() {
   try { store.counts = await api.get('/api/todos/count', { silent: true }) } catch { /* 401 已跳登录 */ }
 }
@@ -254,9 +277,10 @@ function onResize() { if (window.innerWidth < 1100) collapsed.value = true }
 onMounted(() => {
   sessionStorage.setItem('rmlm_pc', '1')
   loadDicts(); refresh(); timer = setInterval(refresh, 60000)
+  clockTimer = setInterval(() => { now.value = new Date() }, 1000)
   onResize(); window.addEventListener('resize', onResize)
 })
-onUnmounted(() => { clearInterval(timer); window.removeEventListener('resize', onResize) })
+onUnmounted(() => { clearInterval(timer); clearInterval(clockTimer); window.removeEventListener('resize', onResize) })
 </script>
 
 <style scoped>
@@ -289,13 +313,23 @@ onUnmounted(() => { clearInterval(timer); window.removeEventListener('resize', o
 .hbtn { width: 36px; height: 36px; border: 0; border-radius: 8px; background: none; color: #cfd8e3; cursor: pointer; display: grid; place-items: center; }
 .hbtn:hover { background: rgba(255, 255, 255, .1); color: #fff; }
 .bell :deep(.el-badge__content) { top: 6px; right: 8px; border: 0; }
-.me { display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 8px 0 4px; border: 0; border-radius: 20px; background: none;
-  color: #e2e8f0; cursor: pointer; font: inherit; }
-.me:hover { background: rgba(255, 255, 255, .1); }
-.avatar { flex: none; width: 30px; height: 30px; border-radius: 50%; background: #1f8fff; color: #fff; font-size: 12px; font-weight: 700; display: grid; place-items: center; }
+.clock { display: flex; flex-direction: column; align-items: flex-end; line-height: 1.2; padding-left: 10px; margin-left: 2px;
+  border-left: 1px solid rgba(255, 255, 255, .14); white-space: nowrap; cursor: default; }
+.ck-time { font-size: 16px; font-weight: 600; color: #fff; font-variant-numeric: tabular-nums; letter-spacing: .5px; }
+.ck-date { font-size: 11.5px; color: #8ea2ba; margin-top: 2px; }
+
+/* 左下角：当前账号 */
+.me-wrap { display: block; flex: none; border-top: 1px solid var(--line); }
+.me { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 14px; border: 0; background: none; color: var(--ink);
+  cursor: pointer; font: inherit; text-align: left; transition: background .12s; }
+.me:hover { background: #f2f6fb; }
+.me.mini { justify-content: center; padding: 10px 0; }
+.avatar { flex: none; width: 32px; height: 32px; border-radius: 50%; background: #1f8fff; color: #fff; font-size: 12px; font-weight: 700; display: grid; place-items: center; }
 .avatar.lg { width: 40px; height: 40px; font-size: 14px; }
-.me-name { font-size: 13px; max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.caret { color: #8ea2ba; }
+.me-text { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.3; }
+.me-name { font-size: 13.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.me-role { font-size: 11.5px; color: var(--ink2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.caret { flex: none; color: #94a3b8; }
 .me-card { display: flex; gap: 12px; padding: 14px 16px 10px; min-width: 260px; max-width: 340px; }
 .card-main { min-width: 0; }
 .card-name { font-weight: 600; font-size: 14px; color: var(--ink); }
@@ -325,18 +359,17 @@ onUnmounted(() => { clearInterval(timer); window.removeEventListener('resize', o
 .ds { font-size: 11.5px; color: var(--ink2); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .item.on .ds { color: #4f7fb5; }
 .badge { flex: none; background: #f56c6c; color: #fff; font-size: 11px; line-height: 18px; min-width: 18px; text-align: center; padding: 0 5px; border-radius: 9px; }
-.fold { flex: none; display: flex; align-items: center; justify-content: center; gap: 6px; height: 40px; margin: 0; border: 0; border-top: 1px solid var(--line);
-  background: none; color: var(--ink2); font: inherit; font-size: 12.5px; cursor: pointer; }
-.fold:hover { color: var(--brand); background: #f7f9fc; }
 
 /* ---------------- 内容区：页签 + 页面 */
 .content { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.tabstrip { flex: none; height: 42px; display: flex; align-items: center; padding: 0 12px; background: #fff; border-bottom: 1px solid var(--line); }
+.tabstrip { flex: none; height: 42px; display: flex; align-items: center; gap: 6px; padding: 0 12px 0 8px; background: #fff; border-bottom: 1px solid var(--line); }
+.fold { flex: none; width: 30px; height: 30px; padding: 0; border: 0; border-radius: 6px; background: none; color: var(--ink2); cursor: pointer;
+  display: grid; place-items: center; }
+.fold:hover { background: #eef2f7; color: var(--brand); }
 .main { flex: 1; min-height: 0; overflow: auto; padding: 20px; }
 
 @media (max-width: 1360px) {
   .lookup { width: 220px; }
-  .me-name { display: none; }
 }
 @media (max-width: 1180px) {
   .brand { width: auto; }

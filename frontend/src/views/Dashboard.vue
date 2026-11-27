@@ -9,7 +9,7 @@
         <h2>{{ greet }}，{{ store.user?.name }}</h2>
         <div class="muted">
           <el-tag v-for="r in store.user?.role_names || []" :key="r" size="small" effect="plain" class="flag">{{ r }}</el-tag>
-          <span>{{ dateText }}<template v-if="store.user?.manager_name"> · 直属上级 {{ store.user.manager_name }}</template></span>
+          <span v-if="store.user?.manager_name">直属上级 {{ store.user.manager_name }}</span>
         </div>
       </div>
       <span class="grow" />
@@ -159,10 +159,6 @@ const greet = computed(() => {
   const h = new Date().getHours()
   return h < 5 ? '夜深了' : h < 11 ? '上午好' : h < 13 ? '中午好' : h < 18 ? '下午好' : '晚上好'
 })
-const dateText = (() => {
-  const t = new Date()
-  return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')} 星期${'日一二三四五六'[t.getDay()]}`
-})()
 
 // ---------------- 导航（与侧栏同一份配置）
 
